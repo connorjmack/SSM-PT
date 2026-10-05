@@ -1,0 +1,32 @@
+# Local data and run outputs
+data/
+runs/
+oceantracker_output/
+root_output_dir/
+
+# Safety net: model data and outputs anywhere in the tree (whitelist small test fixtures explicitly with !path)
+*.nc
+*.nc4
+*.h5
+*.hdf5
+*.zarr/
+*.npz
+*.parquet
+*.log
+
+# Secrets
+.env
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
