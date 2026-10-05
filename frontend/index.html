@@ -32,15 +32,32 @@
     box-shadow: 2px 0 8px rgba(0,0,0,0.2);
   }
   .panel h1 { margin-bottom: 8px; font-size: 26px; line-height: 1.15; }
-  .section-head {
-    margin: 9px 0 5px;
-    padding-top: 7px;
-    border-top: 1px solid #e8e8e8;
-    font-size: 10.5px;
+  /* Collapsible sections; the chevron is drawn with borders so it renders in any font */
+  details.section { margin-top: 8px; border-top: 1px solid #e8e8e8; }
+  details.section > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 10px 2px 8px 0;
+    font-size: 20px;
     font-weight: 700;
-    letter-spacing: 0.4px;
-    text-transform: uppercase;
+    list-style: none;
+    cursor: pointer;
+    user-select: none;
   }
+  details.section > summary::-webkit-details-marker { display: none; }
+  details.section > summary::after {
+    content: '';
+    width: 9px;
+    height: 9px;
+    border-right: 2.5px solid #777;
+    border-bottom: 2.5px solid #777;
+    transform: translateY(-3px) rotate(45deg);
+    transition: transform 0.15s;
+  }
+  details.section:not([open]) > summary::after { transform: rotate(-45deg); }
+  details.section > summary:hover::after { border-color: #0077b6; }
+  .section-body { padding-bottom: 6px; }
   .field {
     display: grid;
     grid-template-columns: 1fr 140px;
@@ -58,6 +75,12 @@
     background: white;
   }
   .hint { margin: -1px 0 6px; font-size: 10.5px; color: #888; line-height: 1.35; }
+  .slider-field { margin-bottom: 8px; }
+  .slider-field .head { display: flex; justify-content: space-between; align-items: baseline; }
+  .slider-field label { color: #444; }
+  .slider-field .utc { font-weight: 600; font-variant-numeric: tabular-nums; }
+  .slider-field input[type=range] { display: block; width: 100%; margin: 4px 0 1px; accent-color: #0077b6; }
+  .slider-field .local { font-size: 10.5px; color: #888; text-align: right; }
   .release-box {
     margin-bottom: 6px;
     padding: 5px 7px;
@@ -144,35 +167,55 @@
 <aside id="panel" class="panel">
   <h1>Salish Sea Model Particle Tracking</h1>
 
-  <div class="section-head">1 · Release</div>
-  <div id="release" class="release-box">Click the map (in the water) to place a release point.</div>
-  <div class="field"><label for="n">Particles</label><input id="n" type="number" min="1" max="5000" value="500"></div>
-  <div class="field"><label for="radius">Spread radius (m)</label><input id="radius" type="number" min="0" max="5000" step="50" value="100"></div>
+  <details class="section" open>
+    <summary>1 · Release</summary>
+    <div class="section-body">
+      <div id="release" class="release-box">Click the map (in the water) to place a release point.</div>
+      <div class="field"><label for="n">Particles</label><input id="n" type="number" min="1" max="5000" value="500"></div>
+      <div class="field"><label for="radius">Spread radius (m)</label><input id="radius" type="number" min="0" max="5000" step="50" value="100"></div>
+    </div>
+  </details>
 
-  <div class="section-head">2 · Time</div>
-  <div class="field"><label for="start">Start</label><select id="start"></select></div>
-  <div class="field"><label for="dur">Duration</label><select id="dur"></select></div>
-  <div class="hint" id="window"></div>
+  <details class="section" open>
+    <summary>2 · Time</summary>
+    <div class="section-body">
+      <div class="slider-field">
+        <div class="head"><label for="start">Start</label><span id="start-utc" class="utc"></span></div>
+        <input id="start" type="range" min="0" max="0" step="1" value="0">
+        <div id="start-local" class="local"></div>
+      </div>
+      <div class="slider-field">
+        <div class="head"><label for="end">End</label><span id="end-utc" class="utc"></span></div>
+        <input id="end" type="range" min="0" max="0" step="1" value="0">
+        <div id="end-local" class="local"></div>
+      </div>
+      <div class="hint" id="window"></div>
+      <div class="field"><label for="dtout">Save positions every</label>
+        <select id="dtout"><option value="5">5 min</option><option value="10" selected>10 min</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">60 min</option></select>
+      </div>
+    </div>
+  </details>
 
-  <div class="section-head">3 · Physics</div>
-  <div class="field"><label for="kh">Diffusivity (m²/s)</label><input id="kh" type="number" min="0" max="100" step="0.1" value="1"></div>
-  <div class="hint">Random spreading by eddies the model does not resolve. 0 = currents only.</div>
-  <div class="field"><label for="dtout">Save positions every</label>
-    <select id="dtout"><option value="5">5 min</option><option value="10" selected>10 min</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">60 min</option></select>
-  </div>
+  <details class="section" open>
+    <summary>3 · Physics</summary>
+    <div class="section-body">
+      <div class="field"><label for="kh">Diffusivity (m²/s)</label><input id="kh" type="number" min="0" max="100" step="0.1" value="1"></div>
+      <div class="hint">Random spreading by eddies the model does not resolve. 0 = currents only.</div>
+    </div>
+  </details>
 
   <button id="run" class="run" disabled>Run</button>
   <div id="status" class="status"></div>
 
-  <div id="results" hidden>
-    <div class="section-head">Result</div>
+  <details id="results" class="section" open hidden>
+    <summary>Result</summary>
     <div class="stat-grid">
       <div class="stat-card"><div class="label">Median distance</div><div class="num" id="s-med">–</div><div class="unit">km from release</div></div>
       <div class="stat-card"><div class="label">Max distance</div><div class="num" id="s-max">–</div><div class="unit">km from release</div></div>
       <div class="stat-card"><div class="label">Particles</div><div class="num" id="s-n">–</div><div class="unit">released</div></div>
       <div class="stat-card"><div class="label">Stopped</div><div class="num" id="s-stop">–</div><div class="unit">stranded or at boundary</div></div>
     </div>
-  </div>
+  </details>
 
   <details class="about">
     <summary>About this model</summary>
@@ -180,6 +223,7 @@
       <li>Currents: NOAA SSCOFS nowcast, hourly. "Surface" is the model's top layer, about the upper 1.6% of the water depth, not the skin layer.</li>
       <li>Tracking: OceanTracker, 2-minute steps, currents interpolated between hours, plus random-walk diffusion.</li>
       <li>No wind or wave drift. Floating material (oil, debris, kelp) will move differently.</li>
+      <li>Arrows: the model's surface current at the nearest hour, one per patch of screen. Zoom in for detail in narrow passages.</li>
       <li>Hourly model output under-resolves the strongest tidal currents.</li>
       <li>Prototype: only <span id="about-window">a few hours</span> of data are loaded.</li>
     </ul>
@@ -215,7 +259,7 @@ const baseImagery = L.layerGroup([
   esriTile('World_Imagery',
     { attribution: 'Imagery &copy; Esri &mdash; Maxar, Earthstar Geographics', maxZoom: 19 }),
   esriTile('Reference/World_Boundaries_and_Places', { maxZoom: 19 })]);
-L.control.layers({ 'Ocean': baseOcean, 'Imagery': baseImagery }, null, { position: 'bottomright' }).addTo(map);
+const layers = L.control.layers({ 'Ocean': baseOcean, 'Imagery': baseImagery }, null, { position: 'bottomright' }).addTo(map);
 L.control.scale({ position: 'bottomright', metric: true, imperial: true }).addTo(map);
 map.attributionControl.addAttribution('Currents: NOAA SSCOFS');
 
@@ -234,8 +278,77 @@ legend.innerHTML = `<h4>Legend</h4>
   <div class="legend-item"><span class="legend-swatch">${dot(COLOR.release, 6)}</span>Release point</div>
   <div class="legend-item"><span class="legend-swatch">${dot(COLOR.moving, 3)}</span>Particle</div>
   <div class="legend-item"><span class="legend-swatch">${dot(COLOR.stopped, 3)}</span>Stranded or stopped</div>
-  <div class="legend-item"><span class="legend-swatch"><span class="sw-line"></span></span>Track</div>`;
+  <div class="legend-item"><span class="legend-swatch"><span class="sw-line"></span></span>Track</div>
+  <div class="legend-item"><span class="legend-swatch"><svg width="14" height="10"><path d="M1 5H12M8.5 2L12 5L8.5 8" stroke="#1d3557" stroke-width="1.3" fill="none"/></svg></span>Surface current (longer = faster)</div>`;
 addControl('bottomleft', legend);
+
+// ── Surface currents (arrows under the tracks) ──
+// The backend sends about one arrow per 30 px screen cell of the view, at the hour
+// shown: the playback time after a run, else the Start slider.
+const arrowPx = s => 26 * Math.sqrt(Math.min(s, 2) / 2);  // sqrt keeps slow water visible; full length at 2 m/s
+map.createPane('currents').style.zIndex = 350;  // above the basemap, below tracks and particles
+map.getPane('currents').style.pointerEvents = 'none';
+const CurrentsLayer = L.Layer.extend({
+  onAdd() {
+    this._canvas = L.DomUtil.create('canvas', 'leaflet-zoom-hide', map.getPane('currents'));
+    map.on('moveend resize', this._load, this);
+    map.on('zoomstart', this._clear, this);
+    this._load();
+  },
+  onRemove() {
+    map.off('moveend resize', this._load, this);
+    map.off('zoomstart', this._clear, this);
+    this._canvas.remove();
+  },
+  setTime(t) {
+    const hour = new Date(Math.round(t / 3.6e6) * 3.6e6);
+    if (+hour === +this._hour) return;
+    this._hour = hour;
+    if (this._map) this._load();
+  },
+  _clear() { this._canvas.width = 0; },
+  async _load() {
+    if (!this._hour) return;
+    const b = map.getBounds(), clamp = x => Math.max(-180, Math.min(180, x));
+    const q = this._q = `currents?time=${this._hour.toISOString()}&west=${clamp(b.getWest())}&south=${b.getSouth()}`
+      + `&east=${clamp(b.getEast())}&north=${b.getNorth()}&zoom=${map.getZoom()}`;
+    let d;
+    try { d = await api('GET', q); } catch { return; }  // arrows are extra; keep the last ones on failure
+    if (q === this._q && this._map) this._draw(d);  // drop replies overtaken by a newer request
+  },
+  _draw(d) {
+    const size = map.getSize(), dpr = window.devicePixelRatio || 1, c = this._canvas;
+    L.DomUtil.setPosition(c, map.containerPointToLayerPoint([0, 0]));
+    c.width = size.x * dpr;
+    c.height = size.y * dpr;
+    c.style.width = size.x + 'px';
+    c.style.height = size.y + 'px';
+    const ctx = c.getContext('2d'), C = Math.cos(0.5), S = Math.sin(0.5);
+    ctx.scale(dpr, dpr);
+    ctx.beginPath();
+    for (let i = 0; i < d.lon.length; i++) {
+      const s = Math.hypot(d.u[i], d.v[i]), len = arrowPx(s);
+      if (len < 2) continue;
+      const p = map.latLngToContainerPoint([d.lat[i], d.lon[i]]);
+      const ux = d.u[i] / s, uy = -d.v[i] / s;  // screen y points down
+      const hx = p.x + ux * len / 2, hy = p.y + uy * len / 2, h = Math.min(5, len * 0.4);
+      ctx.moveTo(p.x - ux * len / 2, p.y - uy * len / 2);
+      ctx.lineTo(hx, hy);
+      ctx.moveTo(hx - h * (ux * C - uy * S), hy - h * (ux * S + uy * C));
+      ctx.lineTo(hx, hy);
+      ctx.lineTo(hx - h * (ux * C + uy * S), hy - h * (uy * C - ux * S));
+    }
+    ctx.lineCap = ctx.lineJoin = 'round';
+    ctx.strokeStyle = 'rgba(255,255,255,0.7)';  // halo so arrows read on both basemaps
+    ctx.lineWidth = 3;
+    ctx.stroke();
+    ctx.strokeStyle = '#1d3557';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+  },
+});
+const currents = new CurrentsLayer().addTo(map);
+layers.addOverlay(currents, 'Surface currents');
 
 // ── Time formatting (data are UTC; WDFW users think in Pacific time) ──
 const fmtUTC = d => d.toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
@@ -267,19 +380,32 @@ async function loadMeta() {
   } catch (e) {
     return setStatus('Cannot reach the backend: ' + e.message, true);
   }
-  $('start').innerHTML = hours.slice(0, -1).map((h, i) =>
-    `<option value="${i}">${fmtUTC(h).slice(5)}</option>`).join('');
-  $('about-window').textContent = `${fmtUTC(hours[0])} to ${fmtUTC(hours[hours.length - 1]).slice(11)}`;
-  updateDurations();
+  // Both sliders span the whole window on disk, so their thumbs line up as one timeline.
+  $('start').max = $('end').max = hours.length - 1;
+  $('end').value = hours.length - 1;
+  $('about-window').textContent = `${fmtUTC(hours[0])} to ${fmtUTC(hours[hours.length - 1])}`;
+  updateTimes();
   $('run').disabled = !release;
 }
-function updateDurations() {
-  const i = +$('start').value, maxH = hours.length - 1 - i;
-  $('dur').innerHTML = Array.from({ length: maxH }, (_, k) => `<option value="${k + 1}">${k + 1} h</option>`).join('');
-  $('dur').value = maxH;
-  $('window').textContent = `Start is ${fmtPacific.format(hours[i])}. Data loaded: ${$('about-window').textContent}.`;
+const durationH = () => (hours[+$('end').value] - hours[+$('start').value]) / 3.6e6;
+function updateTimes(e) {
+  // Keep start at least one hour before end by pushing the other thumb.
+  let s = +$('start').value, en = +$('end').value;
+  if (s >= en) {
+    if (e?.target.id === 'end') { en = Math.max(en, 1); s = en - 1; }
+    else { s = Math.min(s, hours.length - 2); en = s + 1; }
+    $('start').value = s;
+    $('end').value = en;
+  }
+  for (const [id, i] of [['start', s], ['end', en]]) {
+    $(id + '-utc').textContent = fmtUTC(hours[i]).slice(5);
+    $(id + '-local').textContent = fmtPacific.format(hours[i]);
+  }
+  if (!T) currents.setTime(hours[s]);
+  $('window').textContent = `Duration ${durationH()} h. Data on disk: ${$('about-window').textContent}.`;
 }
-$('start').addEventListener('change', updateDurations);
+$('start').addEventListener('input', updateTimes);
+$('end').addEventListener('input', updateTimes);
 
 // ── API ──
 async function api(method, path, body) {
@@ -309,7 +435,7 @@ $('run').addEventListener('click', async () => {
     n_particles: +$('n').value,
     release_radius_m: +$('radius').value,
     start: hours[+$('start').value].toISOString(),
-    duration_h: +$('dur').value,
+    duration_h: durationH(),
     diffusivity_m2s: +$('kh').value,
     output_interval_min: +$('dtout').value,
   };
@@ -374,6 +500,7 @@ function setFrame(k) {
   const t = T.dates[k], dh = (t - T.dates[0]) / 3.6e6;
   $('t-utc').textContent = `${fmtUTC(t)} · +${dh.toFixed(1)} h`;
   $('t-local').textContent = fmtPacific.format(t);
+  currents.setTime(t);
 }
 
 function play() {

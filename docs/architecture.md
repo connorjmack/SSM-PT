@@ -28,7 +28,8 @@ Current state: repo skeleton. Python modules contain only a docstring stating th
 | `fields` | `ensure_hours(hours)`: parallel HTTP range reads of surface fields into a per-hour local cache; atomic (tmp + rename), idempotent. |
 | `engine/base` | Tracker interface: `run(release, params) -> tracks`. |
 | `engine/oceantracker_engine` | OceanTracker adapter. |
-| `api/app` | FastAPI: `GET /meta`, `POST /runs`, `GET /runs/{id}`, `GET /runs/{id}/tracks`. |
+| `currents` | Surface-current arrows for the map: the model element nearest each 30 px screen cell of the view, at one hour. |
+| `api/app` | FastAPI: `GET /meta`, `POST /runs`, `GET /runs/{id}`, `GET /runs/{id}/tracks`, `GET /currents`. |
 | `api/jobs` | Process pool with warm workers; run id = hash of normalized request. |
 
 ### Environment

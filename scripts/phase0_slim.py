@@ -9,20 +9,21 @@ TIME_VARS = ["time", "zeta", "wet_cells"]
 SURFACE_VARS = ["u", "v"]  # written as (time, nele) from siglay=0
 
 
-def slim(src: Path, dst: Path):
-    with netCDF4.Dataset(src) as s, netCDF4.Dataset(dst.with_suffix(".part"), "w") as d:
+def slim(s, dst: Path):
+    """Write the slim copy of s, an open netCDF4 or h5netcdf.legacyapi Dataset (local file or S3 stream)."""
+    with netCDF4.Dataset(dst.with_suffix(".part"), "w") as d:
         d.setncatts({k: s.getncattr(k) for k in ("title", "source", "CoordinateSystem", "CoordinateProjection")})
         for name in ("time", "node", "nele", "three"):
             dim = s.dimensions[name]
             d.createDimension(name, None if dim.isunlimited() else len(dim))
         for name in GRID_VARS + TIME_VARS:
             sv = s[name]
-            dv = d.createVariable(name, sv.dtype, sv.dimensions)
+            dv = d.createVariable(name, sv.dtype.newbyteorder("="), sv.dimensions)
             dv.setncatts({k: sv.getncattr(k) for k in sv.ncattrs() if k != "_FillValue"})
             dv[:] = sv[:]
         for name in SURFACE_VARS:
             sv = s[name]
-            dv = d.createVariable(name, sv.dtype, ("time", "nele"))
+            dv = d.createVariable(name, sv.dtype.newbyteorder("="), ("time", "nele"))
             dv.setncatts({k: sv.getncattr(k) for k in sv.ncattrs() if k != "_FillValue"})
             dv[:] = sv[:, 0, :]
     dst.with_suffix(".part").rename(dst)
@@ -35,7 +36,8 @@ def main():
     args = p.parse_args()
     args.dst.mkdir(parents=True, exist_ok=True)
     for f in sorted(args.src.glob("sscofs.*.fields.n*.nc")):
-        slim(f, args.dst / f.name)
+        with netCDF4.Dataset(f) as s:
+            slim(s, args.dst / f.name)
         print(f"{f.name}: {(args.dst / f.name).stat().st_size / 1e6:.1f} MB")
 
 
