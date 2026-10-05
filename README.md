@@ -41,6 +41,14 @@ uv sync
 uv run pytest
 ```
 
+## Run the prototype
+
+```
+uv run uvicorn ssm_pt.api.app:app --port 8000
+```
+
+Open http://localhost:8000, click the map in the water, then press **Run**. The prototype tracks on the six local hourly files in `data/phase0/slim2d/` (2026-10-04 04:00–09:00 UTC); set `SSM_PT_DATA_DIR` to use another folder. Run output goes to `runs/api/`. The S3 data layer (Phase 1) is not wired in yet.
+
 ## Docs
 
 - [`docs/plan.md`](docs/plan.md): decisions, rationale, phases, risks

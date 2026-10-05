@@ -21,6 +21,13 @@ Seeded from `plan.md` phases. Mark `[x]` as done; archive closed phases.
 - [x] Load output via `load_track_data`; note track array shapes and NetCDF layout
 - [x] Write go/no-go, timings and cache-variable set into plan.md; if no-go, add the numba-tracker fallback to plan.md
 
+## End-to-end slice (local files, before Phase 1)
+- [x] Engine adapter on the 6 local slim files (`SSCOFS2DReader` moved into `engine/oceantracker_engine.py`)
+- [x] FastAPI app serving the API and `frontend/`; one warm worker process; in-memory results keyed by request hash
+- [x] Leaflet page: click release, parameter form, run/poll, track playback, result stats, caveats
+- [x] Land release returns a clear error; runs outside the data window rejected (422)
+- [ ] Show to a WDFW user; collect first impressions
+
 ## Phase 1 — Data layer (TDD)
 ### catalog
 - [ ] Failing tests: hour → (S3 key, `"nowcast"`) for one hour in each cycle block (00–03, 04–09, 10–15, 16–21Z)
@@ -45,13 +52,13 @@ Seeded from `plan.md` phases. Mark `[x]` as done; archive closed phases.
 - [ ] Pre-fill the cache for 2026-10-04; record hour count, bytes and wall time in architecture.md
 
 ## Phase 2 — Engine adapter
-- [ ] Define the Tracker interface and request/params model (reserved fields from plan.md decision 7)
-- [ ] OceanTracker adapter: lon/lat → UTM (pyproj), run, load tracks, UTM → lon/lat rounded to 5 dp
+- [x] Define the Tracker interface and request/params model (reserved fields from plan.md decision 7)
+- [x] OceanTracker adapter: lon/lat → UTM (pyproj), run, load tracks, UTM → lon/lat rounded to 5 dp
 - [ ] Flag particles stranded at the open boundary
 - [ ] `scripts/track.py`: release GeoJSON in, `tracks.json` out
 
 ## Phase 3 — API and jobs
-- [ ] Request normalization + run-id hash
+- [x] Request normalization + run-id hash
 - [ ] Warm-worker process pool
 - [ ] Endpoints `GET /meta`, `POST /runs`, `GET /runs/{id}`, `GET /runs/{id}/tracks`; cache miss → `ensure_hours`
 - [ ] Tests with FastAPI `TestClient` and a fake tracker
@@ -59,9 +66,9 @@ Seeded from `plan.md` phases. Mark `[x]` as done; archive closed phases.
 ## Phase 4 — Leaflet frontend
 - [ ] Map with domain outline from `/meta`
 - [ ] Point/polygon draw (CDN plugin, no build step) and parameter form
-- [ ] Submit, poll, fetch; Canvas playback with time slider
+- [x] Submit, poll, fetch; Canvas playback with time slider
 - [ ] GeoJSON and CSV download
-- [ ] Show UI caveats (surface layer depth, no windage, hourly output)
+- [x] Show UI caveats (surface layer depth, no windage, hourly output)
 
 ## Phase 5 — Deploy and user test
 - [ ] Provision VM in us-east-1; serve API + static frontend

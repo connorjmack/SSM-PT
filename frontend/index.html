@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Salish Sea Model Particle Tracking</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { display: flex; height: 100vh; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #1a1a2e; }
+  #main { position: relative; flex: 1; }
+  #map { width: 100%; height: 100%; }
+
+  .card {
+    background: white;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+  }
+
+  /* Run panel (left sidebar) */
+  .panel {
+    position: relative;
+    z-index: 1001;
+    flex-shrink: 0;
+    width: 320px;
+    height: 100vh;
+    padding: 18px 18px 14px;
+    overflow-y: auto;
+    font-size: 12px;
+    background: white;
+    box-shadow: 2px 0 8px rgba(0,0,0,0.2);
+  }
+  .panel h1 { margin-bottom: 8px; font-size: 26px; line-height: 1.15; }
+  .section-head {
+    margin: 9px 0 5px;
+    padding-top: 7px;
+    border-top: 1px solid #e8e8e8;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+  }
+  .field {
+    display: grid;
+    grid-template-columns: 1fr 140px;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 5px;
+  }
+  .field label { color: #444; }
+  .field input, .field select {
+    width: 100%;
+    padding: 3px 5px;
+    font: inherit;
+    border: 1px solid #ccc;
+    border-radius: 3px;
+    background: white;
+  }
+  .hint { margin: -1px 0 6px; font-size: 10.5px; color: #888; line-height: 1.35; }
+  .release-box {
+    margin-bottom: 6px;
+    padding: 5px 7px;
+    background: #f6f7f9;
+    border-left: 3px solid #ccc;
+    border-radius: 3px;
+    color: #555;
+    line-height: 1.35;
+  }
+  .release-box.set { border-left-color: #f4a100; color: #1a1a2e; }
+  .release-box .coords { font-variant-numeric: tabular-nums; font-weight: 600; }
+  button.run {
+    width: 100%;
+    margin-top: 8px;
+    padding: 7px;
+    font: inherit;
+    font-weight: 600;
+    color: white;
+    background: #0077b6;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  button.run:hover:not(:disabled) { background: #00649a; }
+  button.run:disabled { background: #a9c1d1; cursor: default; }
+  .status { min-height: 15px; margin-top: 6px; font-size: 11.5px; color: #555; }
+  .status.error { color: #c0392b; }
+
+  .stat-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .stat-card {
+    padding: 5px 7px;
+    background: #f6f7f9;
+    border-left: 3px solid #0077b6;
+    border-radius: 3px;
+    line-height: 1.15;
+  }
+  .stat-card .label { font-size: 10px; color: #444; text-transform: uppercase; letter-spacing: 0.3px; }
+  .stat-card .num { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .stat-card .unit { font-size: 9.5px; color: #777; }
+
+  details.about { margin-top: 10px; padding-top: 7px; border-top: 1px solid #e8e8e8; color: #555; }
+  details.about summary { cursor: pointer; font-weight: 600; color: #1a1a2e; }
+  details.about ul { margin: 5px 0 0 14px; line-height: 1.4; }
+  details.about li { margin-bottom: 3px; }
+
+  /* Legend (bottom left) */
+  .legend { padding: 7px 10px; font-size: 11px; line-height: 1.35; }
+  .legend h4 { margin-bottom: 3px; font-size: 11.5px; font-weight: 600; }
+  .legend-item { display: flex; align-items: center; gap: 6px; margin-bottom: 2px; }
+  .legend-swatch { display: inline-block; width: 14px; text-align: center; flex-shrink: 0; }
+  .sw-dot { display: inline-block; border-radius: 50%; border: 1px solid white; box-shadow: 0 0 0 0.5px #999; }
+  .sw-line { display: inline-block; width: 14px; height: 0; border-top: 2px solid #f77f00; vertical-align: middle; }
+
+  /* Playback bar (bottom centre) */
+  #player {
+    position: absolute;
+    bottom: 26px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    display: none;
+    align-items: center;
+    gap: 10px;
+    width: min(600px, calc(100% - 32px));
+    padding: 8px 12px;
+  }
+  #player button {
+    flex-shrink: 0;
+    width: 30px;
+    height: 30px;
+    font-size: 12px;
+    color: white;
+    background: #0077b6;
+    border: none;
+    border-radius: 50%;
+    cursor: pointer;
+  }
+  #player input[type=range] { flex: 1; accent-color: #0077b6; }
+  #player .time { font-size: 11.5px; line-height: 1.3; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  #player .time .local { color: #777; }
+</style>
+</head>
+<body>
+<aside id="panel" class="panel">
+  <h1>Salish Sea Model Particle Tracking</h1>
+
+  <div class="section-head">1 · Release</div>
+  <div id="release" class="release-box">Click the map (in the water) to place a release point.</div>
+  <div class="field"><label for="n">Particles</label><input id="n" type="number" min="1" max="5000" value="500"></div>
+  <div class="field"><label for="radius">Spread radius (m)</label><input id="radius" type="number" min="0" max="5000" step="50" value="100"></div>
+
+  <div class="section-head">2 · Time</div>
+  <div class="field"><label for="start">Start</label><select id="start"></select></div>
+  <div class="field"><label for="dur">Duration</label><select id="dur"></select></div>
+  <div class="hint" id="window"></div>
+
+  <div class="section-head">3 · Physics</div>
+  <div class="field"><label for="kh">Diffusivity (m²/s)</label><input id="kh" type="number" min="0" max="100" step="0.1" value="1"></div>
+  <div class="hint">Random spreading by eddies the model does not resolve. 0 = currents only.</div>
+  <div class="field"><label for="dtout">Save positions every</label>
+    <select id="dtout"><option value="5">5 min</option><option value="10" selected>10 min</option><option value="15">15 min</option><option value="30">30 min</option><option value="60">60 min</option></select>
+  </div>
+
+  <button id="run" class="run" disabled>Run</button>
+  <div id="status" class="status"></div>
+
+  <div id="results" hidden>
+    <div class="section-head">Result</div>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="label">Median distance</div><div class="num" id="s-med">–</div><div class="unit">km from release</div></div>
+      <div class="stat-card"><div class="label">Max distance</div><div class="num" id="s-max">–</div><div class="unit">km from release</div></div>
+      <div class="stat-card"><div class="label">Particles</div><div class="num" id="s-n">–</div><div class="unit">released</div></div>
+      <div class="stat-card"><div class="label">Stopped</div><div class="num" id="s-stop">–</div><div class="unit">stranded or at boundary</div></div>
+    </div>
+  </div>
+
+  <details class="about">
+    <summary>About this model</summary>
+    <ul>
+      <li>Currents: NOAA SSCOFS nowcast, hourly. "Surface" is the model's top layer, about the upper 1.6% of the water depth, not the skin layer.</li>
+      <li>Tracking: OceanTracker, 2-minute steps, currents interpolated between hours, plus random-walk diffusion.</li>
+      <li>No wind or wave drift. Floating material (oil, debris, kelp) will move differently.</li>
+      <li>Hourly model output under-resolves the strongest tidal currents.</li>
+      <li>Prototype: only <span id="about-window">a few hours</span> of data are loaded.</li>
+    </ul>
+  </details>
+</aside>
+
+<main id="main">
+  <div id="map"></div>
+  <div id="player" class="card">
+    <button id="play" title="Play / pause">▶</button>
+    <input id="slider" type="range" min="0" max="0" value="0">
+    <div class="time"><div id="t-utc"></div><div id="t-local" class="local"></div></div>
+  </div>
+</main>
+
+<script>
+const COLOR = { release: '#ffd60a', track: '#f77f00', moving: '#d62828', stopped: '#6c757d' };
+const MOVING = 10;  // OceanTracker status flag for a free particle
+const $ = id => document.getElementById(id);
+
+// ── Map setup ──
+const map = L.map('map', { center: [47.95, -122.55], zoom: 9, preferCanvas: true });
+
+// Basemap: Esri Ocean (keyless; CARTO's keyless tiles now carry an "API KEY
+// REQUIRED" stamp). Ocean's native tiles stop at z16, so upscale beyond that.
+const esriTile = (svc, opt) => L.tileLayer(
+  'https://services.arcgisonline.com/ArcGIS/rest/services/' + svc + '/MapServer/tile/{z}/{y}/{x}', opt);
+const baseOcean = L.layerGroup([
+  esriTile('Ocean/World_Ocean_Base',
+    { attribution: 'Tiles &copy; Esri &mdash; GEBCO, NOAA, Garmin, HERE', maxNativeZoom: 16, maxZoom: 19 }),
+  esriTile('Ocean/World_Ocean_Reference', { maxNativeZoom: 16, maxZoom: 19 })]).addTo(map);
+const baseImagery = L.layerGroup([
+  esriTile('World_Imagery',
+    { attribution: 'Imagery &copy; Esri &mdash; Maxar, Earthstar Geographics', maxZoom: 19 }),
+  esriTile('Reference/World_Boundaries_and_Places', { maxZoom: 19 })]);
+L.control.layers({ 'Ocean': baseOcean, 'Imagery': baseImagery }, null, { position: 'bottomright' }).addTo(map);
+L.control.scale({ position: 'bottomright', metric: true, imperial: true }).addTo(map);
+map.attributionControl.addAttribution('Currents: NOAA SSCOFS');
+
+function addControl(position, el) {
+  const c = L.control({ position });
+  c.onAdd = () => { L.DomEvent.disableClickPropagation(el); L.DomEvent.disableScrollPropagation(el); return el; };
+  return c.addTo(map);
+}
+L.DomEvent.disableClickPropagation($('player'));
+L.DomEvent.disableScrollPropagation($('player'));
+
+// ── Legend ──
+const legend = L.DomUtil.create('div', 'card legend');
+const dot = (c, r) => `<span class="sw-dot" style="background:${c};width:${2*r}px;height:${2*r}px"></span>`;
+legend.innerHTML = `<h4>Legend</h4>
+  <div class="legend-item"><span class="legend-swatch">${dot(COLOR.release, 6)}</span>Release point</div>
+  <div class="legend-item"><span class="legend-swatch">${dot(COLOR.moving, 3)}</span>Particle</div>
+  <div class="legend-item"><span class="legend-swatch">${dot(COLOR.stopped, 3)}</span>Stranded or stopped</div>
+  <div class="legend-item"><span class="legend-swatch"><span class="sw-line"></span></span>Track</div>`;
+addControl('bottomleft', legend);
+
+// ── Time formatting (data are UTC; WDFW users think in Pacific time) ──
+const fmtUTC = d => d.toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+const fmtPacific = new Intl.DateTimeFormat('en-US', {
+  timeZone: 'America/Los_Angeles', month: 'short', day: 'numeric',
+  hour: '2-digit', minute: '2-digit', hour12: false, timeZoneName: 'short' });
+
+// ── Release point ──
+let release = null;  // [lon, lat]
+const releaseDot = L.circleMarker([0, 0], { radius: 7, weight: 2, color: '#1a1a2e', fillColor: COLOR.release, fillOpacity: 1, interactive: false });
+const releaseRing = L.circle([0, 0], { radius: 100, weight: 1.5, color: '#1a1a2e', dashArray: '4 4', fill: false, interactive: false });
+
+map.on('click', e => {
+  release = [+e.latlng.lng.toFixed(5), +e.latlng.lat.toFixed(5)];
+  releaseRing.setLatLng(e.latlng).setRadius(+$('radius').value || 0).addTo(map);
+  releaseDot.setLatLng(e.latlng).addTo(map);
+  $('release').classList.add('set');
+  $('release').innerHTML = `Release at <span class="coords">${release[1].toFixed(4)}° N, ${(-release[0]).toFixed(4)}° W</span><br>Click again to move it.`;
+  $('run').disabled = !hours.length;
+});
+$('radius').addEventListener('input', () => releaseRing.setRadius(+$('radius').value || 0));
+
+// ── Available data window ──
+let hours = [];
+async function loadMeta() {
+  try {
+    const meta = await api('GET', 'meta');
+    hours = meta.hours.map(h => new Date(h));
+  } catch (e) {
+    return setStatus('Cannot reach the backend: ' + e.message, true);
+  }
+  $('start').innerHTML = hours.slice(0, -1).map((h, i) =>
+    `<option value="${i}">${fmtUTC(h).slice(5)}</option>`).join('');
+  $('about-window').textContent = `${fmtUTC(hours[0])} to ${fmtUTC(hours[hours.length - 1]).slice(11)}`;
+  updateDurations();
+  $('run').disabled = !release;
+}
+function updateDurations() {
+  const i = +$('start').value, maxH = hours.length - 1 - i;
+  $('dur').innerHTML = Array.from({ length: maxH }, (_, k) => `<option value="${k + 1}">${k + 1} h</option>`).join('');
+  $('dur').value = maxH;
+  $('window').textContent = `Start is ${fmtPacific.format(hours[i])}. Data loaded: ${$('about-window').textContent}.`;
+}
+$('start').addEventListener('change', updateDurations);
+
+// ── API ──
+async function api(method, path, body) {
+  const r = await fetch(path, {
+    method, headers: body ? { 'Content-Type': 'application/json' } : {},
+    body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    const d = j.detail;
+    throw new Error(typeof d === 'string' ? d
+      : Array.isArray(d) ? d.map(x => `${x.loc[x.loc.length - 1]}: ${x.msg}`).join('; ')
+      : `HTTP ${r.status}`);
+  }
+  return j;
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function setStatus(msg, error = false) {
+  $('status').textContent = msg;
+  $('status').classList.toggle('error', error);
+}
+
+$('run').addEventListener('click', async () => {
+  pause();
+  $('run').disabled = true;
+  const body = {
+    release: { type: 'Point', coordinates: release },
+    n_particles: +$('n').value,
+    release_radius_m: +$('radius').value,
+    start: hours[+$('start').value].toISOString(),
+    duration_h: +$('dur').value,
+    diffusivity_m2s: +$('kh').value,
+    output_interval_min: +$('dtout').value,
+  };
+  const t0 = Date.now(), secs = () => Math.round((Date.now() - t0) / 1000);
+  try {
+    setStatus('Submitting…');
+    let s = await api('POST', 'runs', body);
+    while (s.status === 'queued' || s.status === 'running') {
+      setStatus(`${s.status === 'queued' ? 'Waiting for a worker' : 'Running'}… ${secs()} s`);
+      await sleep(1000);
+      s = await api('GET', `runs/${s.id}`);
+    }
+    if (s.status === 'failed') throw new Error(s.error);
+    showTracks(await api('GET', `runs/${s.id}/tracks`));
+    setStatus(`Done in ${secs()} s. Press ▶ to replay or drag the slider.`);
+  } catch (e) {
+    setStatus(e.message, true);
+  } finally {
+    $('run').disabled = !release;
+  }
+});
+
+// ── Tracks and playback ──
+let T = null, nP = 0, frame = 0, timer = null, dots = [];
+const trackLayer = L.polyline([], { color: COLOR.track, weight: 1, opacity: 0.25, interactive: false }).addTo(map);
+const dotLayer = L.layerGroup().addTo(map);
+
+function showTracks(tr) {
+  T = tr;
+  T.dates = tr.times.map(t => new Date(t));
+  nP = tr.lon[0].length;
+  dotLayer.clearLayers();
+  dots = Array.from({ length: nP }, () => L.circleMarker([0, 0], {
+    radius: 2.5, weight: 0.6, color: 'white', fillColor: COLOR.moving, fillOpacity: 1, interactive: false,
+  }).addTo(dotLayer));
+  $('slider').max = tr.times.length - 1;
+  $('player').style.display = 'flex';
+  showStats();
+
+  const pts = [];
+  tr.lon.forEach((row, i) => row.forEach((lo, p) => lo !== null && pts.push([tr.lat[i][p], lo])));
+  const bounds = L.latLngBounds(pts);
+  if (!map.getBounds().contains(bounds)) map.fitBounds(bounds.pad(0.15));
+  setFrame(0);
+  play();
+}
+
+function setFrame(k) {
+  frame = k;
+  $('slider').value = k;
+  const lines = [];
+  for (let p = 0; p < nP; p++) {
+    const line = [];
+    for (let i = 0; i <= k; i++) if (T.lon[i][p] !== null) line.push([T.lat[i][p], T.lon[i][p]]);
+    lines.push(line);
+    const d = dots[p];
+    if (T.lon[k][p] === null) { d.setStyle({ opacity: 0, fillOpacity: 0 }); continue; }
+    d.setLatLng([T.lat[k][p], T.lon[k][p]]);
+    d.setStyle({ opacity: 1, fillOpacity: 1, fillColor: T.status[k][p] === MOVING ? COLOR.moving : COLOR.stopped });
+  }
+  trackLayer.setLatLngs(lines);
+  const t = T.dates[k], dh = (t - T.dates[0]) / 3.6e6;
+  $('t-utc').textContent = `${fmtUTC(t)} · +${dh.toFixed(1)} h`;
+  $('t-local').textContent = fmtPacific.format(t);
+}
+
+function play() {
+  if (!T) return;
+  if (frame >= T.times.length - 1) setFrame(0);
+  $('play').textContent = '❚❚';
+  timer = setInterval(() => {
+    if (frame >= T.times.length - 1) return pause();
+    setFrame(frame + 1);
+  }, 150);
+}
+function pause() {
+  clearInterval(timer);
+  timer = null;
+  $('play').textContent = '▶';
+}
+$('play').addEventListener('click', () => timer ? pause() : play());
+$('slider').addEventListener('input', e => { pause(); setFrame(+e.target.value); });
+
+function km(lat1, lon1, lat2, lon2) {
+  const r = Math.PI / 180, a = Math.sin((lat2 - lat1) * r / 2) ** 2
+    + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin((lon2 - lon1) * r / 2) ** 2;
+  return 12742 * Math.asin(Math.sqrt(a));
+}
+function showStats() {
+  const last = T.times.length - 1, dist = [];
+  for (let p = 0; p < nP; p++) {
+    let i = last;
+    while (i > 0 && T.lon[i][p] === null) i--;
+    if (T.lon[0][p] !== null) dist.push(km(T.lat[0][p], T.lon[0][p], T.lat[i][p], T.lon[i][p]));
+  }
+  dist.sort((a, b) => a - b);
+  const stopped = T.status[last].filter(s => s !== MOVING).length;
+  $('s-med').textContent = dist.length ? dist[Math.floor(dist.length / 2)].toFixed(1) : '–';
+  $('s-max').textContent = dist.length ? dist[dist.length - 1].toFixed(1) : '–';
+  $('s-n').textContent = nP;
+  $('s-stop').textContent = `${Math.round(100 * stopped / nP)}%`;
+  $('results').hidden = false;
+}
+
+loadMeta();
+</script>
+</body>
+</html>
