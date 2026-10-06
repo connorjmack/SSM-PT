@@ -65,6 +65,8 @@
     gap: 6px;
     margin-bottom: 5px;
   }
+  .field[hidden] { display: none; }
+  .field input[type=checkbox] { width: auto; justify-self: start; }
   .field label { color: #444; }
   .field input, .field select {
     width: 100%;
@@ -120,6 +122,18 @@
   .stat-card .label { font-size: 10px; color: #444; text-transform: uppercase; letter-spacing: 0.3px; }
   .stat-card .num { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .stat-card .unit { font-size: 9.5px; color: #777; }
+  .picked {
+    margin-top: 6px;
+    padding: 5px 7px;
+    background: #f6f7f9;
+    border-left: 3px solid #7b2cbf;
+    border-radius: 3px;
+    line-height: 1.4;
+  }
+  .picked .head { display: flex; justify-content: space-between; align-items: baseline; font-weight: 600; }
+  .picked button { font-size: 15px; line-height: 1; color: #777; background: none; border: none; cursor: pointer; }
+  .picked button:hover { color: #1a1a2e; }
+  .sw-pick { display: inline-block; width: 14px; height: 0; border-top: 2.5px solid #7b2cbf; vertical-align: middle; }
 
   details.about { margin-top: 10px; padding-top: 7px; border-top: 1px solid #e8e8e8; color: #555; }
   details.about summary { cursor: pointer; font-weight: 600; color: #1a1a2e; }
@@ -199,6 +213,14 @@
   <details class="section" open>
     <summary>3 · Physics</summary>
     <div class="section-body">
+      <div class="field"><label for="ptype">What are you tracking?</label>
+        <select id="ptype"><option value="water" selected>Water parcel</option><option value="floating">Floating material</option><option value="decaying">Decaying substance</option></select>
+      </div>
+      <div class="hint" id="ptype-hint"></div>
+      <div class="field" id="f-windage" hidden><label for="windage">Windage (% of wind)</label><input id="windage" type="number" min="0.1" max="10" step="0.5" value="3"></div>
+      <div class="field" id="f-ashore" hidden><label for="ashore">Washes ashore</label><input id="ashore" type="checkbox" checked></div>
+      <div class="hint" id="h-ashore" hidden>Stops for good where it reaches the coast. Untick to have it bounce back into the water, as a water parcel does.</div>
+      <div class="field" id="f-halflife" hidden><label for="halflife">Half-life (h)</label><input id="halflife" type="number" min="0.1" max="1000" step="1" value="24"></div>
       <div class="field"><label for="kh">Diffusivity (m²/s)</label><input id="kh" type="number" min="0" max="100" step="0.1" value="1"></div>
       <div class="hint">Random spreading by eddies the model does not resolve. 0 = currents only.</div>
     </div>
@@ -209,11 +231,18 @@
 
   <details id="results" class="section" open hidden>
     <summary>Result</summary>
+    <div class="hint" id="r-kind"></div>
     <div class="stat-grid">
       <div class="stat-card"><div class="label">Median distance</div><div class="num" id="s-med">–</div><div class="unit">km from release</div></div>
       <div class="stat-card"><div class="label">Max distance</div><div class="num" id="s-max">–</div><div class="unit">km from release</div></div>
       <div class="stat-card"><div class="label">Particles</div><div class="num" id="s-n">–</div><div class="unit">released</div></div>
-      <div class="stat-card"><div class="label">Stopped</div><div class="num" id="s-stop">–</div><div class="unit">stranded or at boundary</div></div>
+      <div class="stat-card"><div class="label">Stranded</div><div class="num" id="s-stranded">–</div><div class="unit">on flats the tide has left dry</div></div>
+      <div class="stat-card" id="c-ashore" hidden style="grid-column: span 2"><div class="label">Washed ashore</div><div class="num" id="s-ashore">–</div><div class="unit">on the coast by the end of the run; they stay there</div></div>
+      <div class="stat-card" id="c-left" hidden style="grid-column: span 2"><div class="label">Remaining</div><div class="num" id="s-left">–</div><div class="unit">of the released amount, at the end of the run</div></div>
+    </div>
+    <div id="picked" class="picked" hidden>
+      <div class="head"><span id="p-title"></span><button id="p-clear" title="Clear (Esc)">×</button></div>
+      <div id="p-info"></div>
     </div>
   </details>
 
@@ -222,7 +251,10 @@
     <ul>
       <li>Currents: NOAA SSCOFS nowcast, hourly. "Surface" is the model's top layer, about the upper 1.6% of the water depth, not the skin layer.</li>
       <li>Tracking: OceanTracker, 2-minute steps, currents interpolated between hours, plus random-walk diffusion.</li>
-      <li>No wind or wave drift. Floating material (oil, debris, kelp) will move differently.</li>
+      <li>Wind: only "Floating material" feels it, as a set share of the model's 10 m wind. That share also stands in for wave (Stokes) drift, which the model lacks.</li>
+      <li>Coast: water parcels and decaying substances bounce back off it. Floating material washes ashore and stays there, unless you untick "Washes ashore". The model's open-ocean edges act as coast for now.</li>
+      <li>Tidal flats: a particle the falling tide leaves on a dry flat is stranded until the water returns, then moves on.</li>
+      <li>Sinking particles and larvae need currents below the surface and are not available yet.</li>
       <li>Arrows: the model's surface current at the nearest hour, one per patch of screen. Zoom in for detail in narrow passages.</li>
       <li>Hourly model output under-resolves the strongest tidal currents.</li>
       <li>Prototype: only <span id="about-window">a few hours</span> of data are loaded.</li>
@@ -240,8 +272,10 @@
 </main>
 
 <script>
-const COLOR = { release: '#ffd60a', track: '#f77f00', moving: '#d62828', stopped: '#6c757d' };
-const MOVING = 10;  // OceanTracker status flag for a free particle
+const COLOR = { release: '#ffd60a', track: '#f77f00', moving: '#d62828', stranded: '#6c757d', ashore: '#8b5e34', picked: '#7b2cbf' };
+// Particle status flags: OceanTracker's, plus ASHORE from backend/ssm_pt/engine/oceantracker_engine.py
+const MOVING = 10, STRANDED = 3, ASHORE = -3;
+const dotColor = s => s === MOVING ? COLOR.moving : s === ASHORE ? COLOR.ashore : COLOR.stranded;
 const $ = id => document.getElementById(id);
 
 // ── Map setup ──
@@ -277,8 +311,10 @@ const dot = (c, r) => `<span class="sw-dot" style="background:${c};width:${2*r}p
 legend.innerHTML = `<h4>Legend</h4>
   <div class="legend-item"><span class="legend-swatch">${dot(COLOR.release, 6)}</span>Release point</div>
   <div class="legend-item"><span class="legend-swatch">${dot(COLOR.moving, 3)}</span>Particle</div>
-  <div class="legend-item"><span class="legend-swatch">${dot(COLOR.stopped, 3)}</span>Stranded or stopped</div>
+  <div class="legend-item"><span class="legend-swatch">${dot(COLOR.stranded, 3)}</span>Stranded by the tide</div>
+  <div class="legend-item"><span class="legend-swatch">${dot(COLOR.ashore, 3)}</span>Washed ashore</div>
   <div class="legend-item"><span class="legend-swatch"><span class="sw-line"></span></span>Track</div>
+  <div class="legend-item"><span class="legend-swatch"><span class="sw-pick"></span></span>Selected particle's path</div>
   <div class="legend-item"><span class="legend-swatch"><svg width="14" height="10"><path d="M1 5H12M8.5 2L12 5L8.5 8" stroke="#1d3557" stroke-width="1.3" fill="none"/></svg></span>Surface current (longer = faster)</div>`;
 addControl('bottomleft', legend);
 
@@ -362,6 +398,9 @@ const releaseDot = L.circleMarker([0, 0], { radius: 7, weight: 2, color: '#1a1a2
 const releaseRing = L.circle([0, 0], { radius: 100, weight: 1.5, color: '#1a1a2e', dashArray: '4 4', fill: false, interactive: false });
 
 map.on('click', e => {
+  const p = nearestParticle(e.containerPoint);
+  if (p !== null) return pickParticle(p);
+  if (picked !== null) return pickParticle(null);
   release = [+e.latlng.lng.toFixed(5), +e.latlng.lat.toFixed(5)];
   releaseRing.setLatLng(e.latlng).setRadius(+$('radius').value || 0).addTo(map);
   releaseDot.setLatLng(e.latlng).addTo(map);
@@ -407,6 +446,30 @@ function updateTimes(e) {
 $('start').addEventListener('input', updateTimes);
 $('end').addEventListener('input', updateTimes);
 
+// ── What is tracked: each class adds its own physics (backend/ssm_pt/engine/base.py) ──
+const KIND = {
+  water: { label: 'Water parcel', hint: 'Moves with the surface current, plus random spreading. For the water itself or anything dissolved in it.' },
+  floating: { label: 'Floating material', hint: 'Also pushed downwind by a share of the model\'s 10 m wind. For oil 1–4% is typical (3% is the usual rule of thumb); things that stick out of the water drift faster.' },
+  decaying: { label: 'Decaying substance', hint: 'Moves like a water parcel, but its amount halves every half-life (for example bacteria from an outfall). Dots fade as it decays.' },
+};
+function updateKind() {
+  const k = $('ptype').value;
+  $('ptype-hint').textContent = KIND[k].hint;
+  $('f-windage').hidden = $('f-ashore').hidden = $('h-ashore').hidden = k !== 'floating';
+  $('f-halflife').hidden = k !== 'decaying';
+}
+$('ptype').addEventListener('change', updateKind);
+updateKind();
+function particleSpec() {
+  const type = $('ptype').value;
+  return type === 'floating' ? { type, windage_pct: +$('windage').value, washes_ashore: $('ashore').checked }
+    : type === 'decaying' ? { type, half_life_h: +$('halflife').value }
+    : { type };
+}
+const describe = p => KIND[p.type].label
+  + (p.type === 'floating' ? `, ${p.windage_pct}% windage, ${p.washes_ashore ? 'washes ashore' : 'stays afloat'}`
+    : p.type === 'decaying' ? `, half-life ${p.half_life_h} h` : '');
+
 // ── API ──
 async function api(method, path, body) {
   const r = await fetch(path, {
@@ -438,6 +501,7 @@ $('run').addEventListener('click', async () => {
     duration_h: durationH(),
     diffusivity_m2s: +$('kh').value,
     output_interval_min: +$('dtout').value,
+    particle: particleSpec(),
   };
   const t0 = Date.now(), secs = () => Math.round((Date.now() - t0) / 1000);
   try {
@@ -449,8 +513,9 @@ $('run').addEventListener('click', async () => {
       s = await api('GET', `runs/${s.id}`);
     }
     if (s.status === 'failed') throw new Error(s.error);
-    showTracks(await api('GET', `runs/${s.id}/tracks`));
-    setStatus(`Done in ${secs()} s. Press ▶ to replay or drag the slider.`);
+    showTracks(await api('GET', `runs/${s.id}/tracks`), body.particle);
+    $('r-kind').textContent = describe(body.particle);
+    setStatus(`Done in ${secs()} s. Press ▶ to replay, drag the slider, or click a particle.`);
   } catch (e) {
     setStatus(e.message, true);
   } finally {
@@ -463,11 +528,13 @@ let T = null, nP = 0, frame = 0, timer = null, dots = [];
 const trackLayer = L.polyline([], { color: COLOR.track, weight: 1, opacity: 0.25, interactive: false }).addTo(map);
 const dotLayer = L.layerGroup().addTo(map);
 
-function showTracks(tr) {
+function showTracks(tr, particle) {
   T = tr;
+  T.particle = particle;
   T.dates = tr.times.map(t => new Date(t));
   nP = tr.lon[0].length;
   dotLayer.clearLayers();
+  pickParticle(null);
   dots = Array.from({ length: nP }, () => L.circleMarker([0, 0], {
     radius: 2.5, weight: 0.6, color: 'white', fillColor: COLOR.moving, fillOpacity: 1, interactive: false,
   }).addTo(dotLayer));
@@ -494,11 +561,12 @@ function setFrame(k) {
     const d = dots[p];
     if (T.lon[k][p] === null) { d.setStyle({ opacity: 0, fillOpacity: 0 }); continue; }
     d.setLatLng([T.lat[k][p], T.lon[k][p]]);
-    d.setStyle({ opacity: 1, fillOpacity: 1, fillColor: T.status[k][p] === MOVING ? COLOR.moving : COLOR.stopped });
+    const a = T.remaining ? Math.max(0.15, T.remaining[k][p] ?? 1) : 1;  // decaying runs fade with what is left
+    d.setStyle({ opacity: a, fillOpacity: a, fillColor: dotColor(T.status[k][p]) });
   }
   trackLayer.setLatLngs(lines);
   const t = T.dates[k], dh = (t - T.dates[0]) / 3.6e6;
-  $('t-utc').textContent = `${fmtUTC(t)} · +${dh.toFixed(1)} h`;
+  $('t-utc').textContent = `${fmtUTC(t)} · +${dh.toFixed(1)} h` + (T.remaining ? ` · ${pct(leftAt(k))} left` : '');
   $('t-local').textContent = fmtPacific.format(t);
   currents.setTime(t);
 }
@@ -520,6 +588,61 @@ function pause() {
 $('play').addEventListener('click', () => timer ? pause() : play());
 $('slider').addEventListener('input', e => { pause(); setFrame(+e.target.value); });
 
+// ── One particle's whole path: click near a particle (any frame) to show it ──
+const PICK_PX = 8;  // click tolerance; the dots are only 5 px across
+let picked = null;
+const pickLayer = L.layerGroup([
+  L.polyline([], { color: 'white', weight: 5, opacity: 0.9, interactive: false }),
+  L.polyline([], { color: COLOR.picked, weight: 2.5, interactive: false }),
+  L.circleMarker([0, 0], { radius: 4, weight: 2, color: COLOR.picked, fillColor: 'white', fillOpacity: 1, interactive: false }),
+  L.circleMarker([0, 0], { radius: 4.5, weight: 1.5, color: 'white', fillColor: COLOR.picked, fillOpacity: 1, interactive: false }),
+]);
+
+function nearestParticle(pt) {
+  if (!T) return null;
+  let best = null, bestD = PICK_PX;
+  for (let p = 0; p < nP; p++) {
+    if (T.lon[frame][p] === null) continue;
+    const d = map.latLngToContainerPoint([T.lat[frame][p], T.lon[frame][p]]).distanceTo(pt);
+    if (d < bestD) { bestD = d; best = p; }
+  }
+  return best;
+}
+
+function pickParticle(p) {
+  picked = p;
+  $('picked').hidden = p === null;
+  trackLayer.setStyle({ opacity: p === null ? 0.25 : 0.1 });  // fade the others behind the selection
+  if (p === null) return pickLayer.remove();
+  const path = [], idx = [];
+  T.lon.forEach((row, i) => { if (row[p] !== null) { path.push([T.lat[i][p], row[p]]); idx.push(i); } });
+  const [halo, line, start, end] = pickLayer.getLayers();
+  halo.setLatLngs(path);
+  line.setLatLngs(path);
+  start.setLatLng(path[0]);
+  end.setLatLng(path[path.length - 1]);
+  pickLayer.addTo(map);
+
+  let len = 0;
+  for (let i = 1; i < path.length; i++) len += km(...path[i - 1], ...path[i]);
+  const first = s => idx.find(i => T.status[i][p] === s);
+  const ashore = first(ASHORE), stranded = first(STRANDED);
+  const when = i => `${fmtPacific.format(T.dates[i])} (+${((T.dates[i] - T.dates[0]) / 3.6e6).toFixed(1)} h)`;
+  $('p-title').textContent = `Particle ${p + 1} of ${nP}`;
+  $('p-info').innerHTML = `Travelled ${len.toFixed(1)} km along its path<br>`
+    + `Ended ${km(...path[0], ...path[path.length - 1]).toFixed(1)} km from where it started<br>`
+    + (ashore !== undefined ? `Washed ashore ${when(ashore)}`
+      : stranded !== undefined ? `First stranded by the tide ${when(stranded)}`
+      : idx[idx.length - 1] < T.times.length - 1 ? `Last position ${when(idx[idx.length - 1])}`
+      : 'Still moving at the end of the run')
+    + (T.remaining ? `<br>${pct(T.remaining[idx[idx.length - 1]][p])} left at its last position` : '');
+  $('picked').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+$('p-clear').addEventListener('click', () => pickParticle(null));
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && picked !== null) pickParticle(null); });
+// Pointer cursor over a pickable particle, so the feature is discoverable
+map.on('mousemove', e => { map.getContainer().style.cursor = nearestParticle(e.containerPoint) === null ? '' : 'pointer'; });
+
 function km(lat1, lon1, lat2, lon2) {
   const r = Math.PI / 180, a = Math.sin((lat2 - lat1) * r / 2) ** 2
     + Math.cos(lat1 * r) * Math.cos(lat2 * r) * Math.sin((lon2 - lon1) * r / 2) ** 2;
@@ -533,13 +656,23 @@ function showStats() {
     if (T.lon[0][p] !== null) dist.push(km(T.lat[0][p], T.lon[0][p], T.lat[i][p], T.lon[i][p]));
   }
   dist.sort((a, b) => a - b);
-  const stopped = T.status[last].filter(s => s !== MOVING).length;
+  const share = s => `${Math.round(100 * T.status[last].filter(x => x === s).length / nP)}%`;
   $('s-med').textContent = dist.length ? dist[Math.floor(dist.length / 2)].toFixed(1) : '–';
   $('s-max').textContent = dist.length ? dist[dist.length - 1].toFixed(1) : '–';
   $('s-n').textContent = nP;
-  $('s-stop').textContent = `${Math.round(100 * stopped / nP)}%`;
+  $('s-stranded').textContent = share(STRANDED);
+  $('c-ashore').hidden = !T.particle.washes_ashore;
+  $('s-ashore').textContent = share(ASHORE);
+  $('c-left').hidden = !T.remaining;
+  if (T.remaining) $('s-left').textContent = pct(leftAt(last));
   $('results').hidden = false;
 }
+// Decaying runs: mean fraction left over the particles still tracked at frame k
+function leftAt(k) {
+  const r = T.remaining[k].filter(x => x !== null);
+  return r.length ? r.reduce((a, b) => a + b, 0) / r.length : 0;
+}
+const pct = f => f >= 0.01 || f === 0 ? `${Math.round(100 * f)}%` : '<1%';
 
 loadMeta();
 </script>

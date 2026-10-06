@@ -6,7 +6,7 @@ from pathlib import Path
 import h5netcdf.legacyapi as h5nc
 import s3fs
 
-from phase0_slim import slim
+from phase0_slim import add_vars, missing_vars, slim
 
 BUCKET = "noaa-nos-ofs-pds/sscofs/netcdf"
 
@@ -37,16 +37,20 @@ def main():
     while t <= end:
         key, name = nowcast_key(t)
         dest = args.out / name
-        if dest.exists():
+        add = missing_vars(dest) if dest.exists() else None  # files from before a variable was added
+        if add == []:
             print(f"skip {name}")
         elif not fs.exists(key):
             missing.append(name)
             print(f"MISSING {name}")
         else:
-            # 2 MB blocks fetch ~44 MB of the 211 MB file: u/v are stored in 4-layer chunks
+            # 2 MB blocks fetch ~48 MB of the 211 MB file: u/v are stored in 4-layer chunks
             with fs.open(key, "rb", block_size=2**21, cache_type="blockcache") as f, h5nc.Dataset(f, "r") as s:
-                slim(s, dest)
-            print(f"got  {name}  ({t:%Y-%m-%d %H}Z)")
+                if add:
+                    add_vars(s, dest, add)
+                else:
+                    slim(s, dest)
+            print(f"{'added ' + ', '.join(add) + ' to' if add else 'got'}  {name}  ({t:%Y-%m-%d %H}Z)")
         t += timedelta(hours=1)
     if missing:
         print(f"{len(missing)} hours missing on S3; the run window will have gaps: {missing}")

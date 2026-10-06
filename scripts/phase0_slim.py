@@ -1,11 +1,12 @@
 """Phase 0: write slimmed 2D surface-only copies of SSCOFS fields files (candidate cache format)."""
 import argparse
+import shutil
 from pathlib import Path
 
 import netCDF4
 
 GRID_VARS = ["x", "y", "xc", "yc", "lon", "lat", "lonc", "latc", "nv", "h"]
-TIME_VARS = ["time", "zeta", "wet_cells"]
+TIME_VARS = ["time", "zeta", "wet_cells", "uwind_speed", "vwind_speed"]  # wind (10 m, elements) for windage
 SURFACE_VARS = ["u", "v"]  # written as (time, nele) from siglay=0
 
 
@@ -17,16 +18,36 @@ def slim(s, dst: Path):
             dim = s.dimensions[name]
             d.createDimension(name, None if dim.isunlimited() else len(dim))
         for name in GRID_VARS + TIME_VARS:
-            sv = s[name]
-            dv = d.createVariable(name, sv.dtype.newbyteorder("="), sv.dimensions)
-            dv.setncatts({k: sv.getncattr(k) for k in sv.ncattrs() if k != "_FillValue"})
-            dv[:] = sv[:]
+            _copy(s, d, name)
         for name in SURFACE_VARS:
             sv = s[name]
             dv = d.createVariable(name, sv.dtype.newbyteorder("="), ("time", "nele"))
             dv.setncatts({k: sv.getncattr(k) for k in sv.ncattrs() if k != "_FillValue"})
             dv[:] = sv[:, 0, :]
     dst.with_suffix(".part").rename(dst)
+
+
+def _copy(s, d, name: str):
+    sv = s[name]
+    dv = d.createVariable(name, sv.dtype.newbyteorder("="), sv.dimensions)
+    dv.setncatts({k: sv.getncattr(k) for k in sv.ncattrs() if k != "_FillValue"})
+    dv[:] = sv[:]
+
+
+def missing_vars(dst: Path) -> list[str]:
+    """Grid and time variables a slim copy lacks, e.g. wind in files written before it was added."""
+    with netCDF4.Dataset(dst) as d:
+        return [n for n in GRID_VARS + TIME_VARS if n not in d.variables]
+
+
+def add_vars(s, dst: Path, names: list[str]):
+    """Copy the named variables from s into the existing slim copy dst (via a temporary copy, so a failure leaves dst intact)."""
+    part = dst.with_suffix(".part")
+    shutil.copyfile(dst, part)
+    with netCDF4.Dataset(part, "a") as d:
+        for name in names:
+            _copy(s, d, name)
+    part.rename(dst)
 
 
 def main():

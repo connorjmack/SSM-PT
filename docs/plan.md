@@ -6,7 +6,7 @@ A web particle-tracking tool for the Salish Sea for WDFW and other semi-technica
 
 **Prototype scope:** one day of hourly nowcast data (2026-10-04), surface currents only.
 
-**Later features (design must not block these):** forecast mode, windage, 3D / fixed depth, backtracking, connectivity / polygon statistics, longer archive.
+**Later features (design must not block these):** forecast mode, 3D / fixed depth (needed for sinking particles and larvae), backtracking, connectivity / polygon statistics, longer archive.
 
 ## Decisions
 
@@ -56,9 +56,9 @@ A web particle-tracking tool for the Salish Sea for WDFW and other semi-technica
 {"release": {"type": "Point", "coordinates": [-122.6, 48.4]},
  "n_particles": 500, "start": "2026-10-04T06:00Z", "duration_h": 24,
  "diffusivity_m2s": 1.0, "output_interval_min": 30,
- "depth_mode": "surface", "windage_pct": 0}
+ "depth_mode": "surface", "particle": {"type": "floating", "windage_pct": 3}}
 ```
-`release` is a GeoJSON Point or Polygon. Prototype accepts only `depth_mode="surface"` and `windage_pct=0`.
+`release` is a GeoJSON Point or Polygon. Prototype accepts only `depth_mode="surface"`. `particle` picks what is tracked: `{"type": "water"}` (default), `{"type": "floating", "windage_pct": 3, "washes_ashore": true}` (adds that % of the 10 m model wind; with `washes_ashore` it stops for good at the coastline, status `-3` in the tracks), or `{"type": "decaying", "half_life_h": 24}` (adds a per-particle `remaining` fraction to the tracks). Sinking particles and larvae need 3D currents and wait for 3D / fixed depth.
 
 ### 8. Environment: uv, `pyproject.toml` at repo root, `uv.lock`; no conda
 - Every dependency, including OceanTracker (pip-only), has PyPI wheels.
@@ -108,8 +108,10 @@ A web particle-tracking tool for the Salish Sea for WDFW and other semi-technica
 ## UI caveats (show to users)
 
 - "Surface" is the top sigma layer, about 1.6% of water depth (`siglay[0] = -0.0158`), not the skin layer.
-- No windage or Stokes drift in the prototype; floating material (oil, debris, kelp) moves differently.
+- Windage is a fixed share of the model's 10 m wind and also stands in for Stokes drift (SSCOFS has no waves). Real leeway depends on the object's shape and how high it floats.
 - Hourly model output under-resolves peak tidal currents.
+- Coast: OceanTracker moves a particle that would cross the coastline back to its last position, so water parcels bounce back. Floating material washes ashore instead (it stops at its last position, within one 2-minute step of the coast). Particles on a cell that dries are stranded until it floods.
+- The FVCOM reader finds no open-boundary nodes, so the ocean edges act as coast: water that should leave piles up there, and floating material "washes ashore" on them.
 
 ## Success criteria
 

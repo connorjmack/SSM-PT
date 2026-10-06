@@ -11,7 +11,7 @@ Current state: repo skeleton. Python modules contain only a docstring stating th
 | `backend/ssm_pt/api/` | FastAPI app and job pool (stubs). |
 | `backend/tests/` | pytest suite (`testpaths` in `pyproject.toml`). Empty. |
 | `frontend/` | Leaflet client. Empty. |
-| `scripts/` | CLIs and one-off scripts. Phase 0 test scripts: `phase0_fetch.py` downloads full files to `data/phase0/full/`; `phase0_slim.py` writes 2D surface files to `data/phase0/slim2d/` (23 MB/hour); `phase0_run.py` runs OceanTracker into `runs/phase0/<tag>/`; `phase0_reader.py` holds the `SSCOFS2DReader` subclass, imported by OceanTracker via `add_path`. |
+| `scripts/` | CLIs and one-off scripts. Phase 0 test scripts: `phase0_fetch.py` downloads full files to `data/phase0/full/`; `phase0_slim.py` writes 2D surface files, with 10 m wind, to `data/phase0/slim2d/` (27 MB/hour); `phase0_run.py` runs OceanTracker into `runs/phase0/<tag>/`; `phase0_reader.py` holds the `SSCOFS2DReader` subclass, imported by OceanTracker via `add_path`. |
 | `docs/` | `plan.md` (decisions), `todo.md` (checklist), this file. |
 | `pyproject.toml`, `uv.lock`, `.python-version` | Environment source of truth. |
 
@@ -26,8 +26,8 @@ Current state: repo skeleton. Python modules contain only a docstring stating th
 | `catalog` | Pure function: valid hour → S3 key + source label (nowcast/forecast). |
 | `grid` | Extract the static mesh once; domain-outline GeoJSON from boundary edges (edges in exactly one triangle). |
 | `fields` | `ensure_hours(hours)`: parallel HTTP range reads of surface fields into a per-hour local cache; atomic (tmp + rename), idempotent. |
-| `engine/base` | Tracker interface: `run(release, params) -> tracks`. |
-| `engine/oceantracker_engine` | OceanTracker adapter. |
+| `engine/base` | Tracker interface: `run(release, params) -> tracks`. Request model, including the particle classes (water parcel, floating, decaying). |
+| `engine/oceantracker_engine` | OceanTracker adapter. Floating adds a `Windage` velocity modifier (a share of the `wind_velocity` reader field) and, unless `washes_ashore` is false, a `WashAshore` trajectory modifier that sets our own status `ASHORE = -3` where OceanTracker would move a particle back off the coastline. Decaying adds OceanTracker's `AgeDecay` property as `remaining`. |
 | `currents` | Surface-current arrows for the map: the model element nearest each 30 px screen cell of the view, at one hour. |
 | `api/app` | FastAPI: `GET /meta`, `POST /runs`, `GET /runs/{id}`, `GET /runs/{id}/tracks`, `GET /currents`. |
 | `api/jobs` | Process pool with warm workers; run id = hash of normalized request. |

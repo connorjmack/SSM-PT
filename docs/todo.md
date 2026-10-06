@@ -54,7 +54,7 @@ Seeded from `plan.md` phases. Mark `[x]` as done; archive closed phases.
 ## Phase 2 — Engine adapter
 - [x] Define the Tracker interface and request/params model (reserved fields from plan.md decision 7)
 - [x] OceanTracker adapter: lon/lat → UTM (pyproj), run, load tracks, UTM → lon/lat rounded to 5 dp
-- [ ] Flag particles stranded at the open boundary
+- [ ] Let particles leave through the open ocean boundary and flag them (the FVCOM reader finds no open-boundary nodes, so the edge acts as coast)
 - [ ] `scripts/track.py`: release GeoJSON in, `tracks.json` out
 
 ## Phase 3 — API and jobs
@@ -68,7 +68,10 @@ Seeded from `plan.md` phases. Mark `[x]` as done; archive closed phases.
 - [ ] Point/polygon draw (CDN plugin, no build step) and parameter form
 - [x] Submit, poll, fetch; Canvas playback with time slider
 - [ ] GeoJSON and CSV download
-- [x] Show UI caveats (surface layer depth, no windage, hourly output)
+- [x] Show UI caveats (surface layer depth, windage limits, hourly output)
+- [x] Particle classes: water parcel, floating (windage), decaying (half-life)
+- [x] Floating material washes ashore (option, on by default); "Stranded" card counts only tidal stranding
+- [ ] Sinking particles and larvae (need 3D currents)
 
 ## Phase 5 — Deploy and user test
 - [ ] Provision VM in us-east-1; serve API + static frontend
