@@ -278,6 +278,57 @@ def test_coupled_near_field_runs_plumes_every_hour_and_caps_the_map(tmp_path):
     assert meta["min_dilution"] >= min(nf["dilution"]) * (1 - 1e-6)
 
 
+STRAIT = (-123.05, 48.17)  # 98 m deep, open water for kilometres east, inside the Sequim box
+
+
+def sheared_copy(src, dst, top=0.3):
+    """A Sequim-box file with a known current: eastward, top m/s in the surface layer falling to 0 in the bottom
+    one, with no vertical velocity or tide. FVCOM stores layers surface first."""
+    import shutil
+
+    import netCDF4
+    shutil.copy(src, dst)
+    with netCDF4.Dataset(dst, "a") as nc:
+        n = nc.dimensions["siglay"].size
+        nc["u"][:] = np.broadcast_to((top * np.arange(n - 1, -1, -1) / (n - 1))[None, :, None], nc["u"].shape)
+        for k in ("v", "ww", "zeta"):
+            nc[k][:] = 0
+
+
+def fixed_depth_tracks(hindcast, reader, points, out_dir, hours=2.0):
+    """OceanTracker tracks of particles held at their depth (no vertical velocity or mixing): (time, particle, xyz)."""
+    from oceantracker.main import OceanTracker
+    from oceantracker.read_output.python import load_output_files
+    ot = OceanTracker()
+    ot.settings(run_output_dir=str(out_dir), time_step=60, NUMBA_cache_code=True, max_run_duration=hours * 3600)
+    ot.add_class("reader", class_name=reader, input_dir=str(hindcast), file_mask="sscofs.*.nc", geographic_coords=False)
+    ot.add_class("dispersion", A_H=0.0, A_V=0.0)
+    ot.add_class("tracks_writer", update_interval=600)
+    for i, p in enumerate(points):
+        ot.add_class("release_groups", name=f"p{i}", points=[p], pulse_size=1)
+    return load_output_files.load_track_data(ot.run())["x"]
+
+
+@needs_sequim_3d
+def test_3d_reader_puts_surface_currents_at_the_surface(tmp_path):
+    """plan.md Risks: OceanTracker's FVCOM reader flips the sigma fractions to its bottom-up order but not the
+    data, so near-surface particles moved with near-bottom currents (Phase 0: 3-7x too slow)."""
+    from ssm_pt.engine.oceantracker_engine import TO_UTM
+    from ssm_pt.engine.plume import window_files
+    hindcast = tmp_path / "hindcast"
+    hindcast.mkdir()
+    t0 = datetime(2026, 7, 1, 2, tzinfo=UTC)
+    for f in window_files(SEQUIM_3D, t0, t0 + timedelta(hours=2)):
+        sheared_copy(f, hindcast / f.name)
+    x, y = TO_UTM.transform(*STRAIT)
+    tracks = fixed_depth_tracks(hindcast, "ssm_pt.engine.oceantracker_engine.SSCOFS3DReader",
+                                [[x, y, -1.0], [x, y, -90.0]], tmp_path / "out")
+    east = tracks[-1, :, 0] - tracks[0, :, 0]
+    assert east[0] > 0.8 * 0.3 * 2 * 3600  # 1 m down: about the surface layer's 0.3 m/s for 2 h
+    assert abs(east[1]) < 0.1 * 0.3 * 2 * 3600  # 8 m above the seabed: about the bottom layer's 0
+    assert np.abs(tracks[:, :, 2] - tracks[0, :, 2]).max() < 0.01  # held at their depth
+
+
 @needs_plume_data
 def test_sources_run_together_match_their_separate_runs(tmp_path):
     """Superposition: sources share nothing in a run, so each one's map matches its own run within particle noise.

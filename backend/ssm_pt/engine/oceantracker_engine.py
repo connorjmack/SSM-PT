@@ -60,6 +60,29 @@ class SSCOFS2DReader(FVCOMreader):
         return data[:, :, :, np.newaxis]  # (time, node, z=1, component)
 
 
+class SSCOFS3DReader(SSCOFS2DReader):
+    """FVCOMreader (0.5.3.9) flips the sigma fractions to OceanTracker's bottom-up order but not the data, so 3D runs
+    gave near-surface particles near-bottom currents (Phase 0's 3-7x too-slow surface tracks;
+    scripts/layer_check.py). Flip the data too."""
+
+    def read_file_var_as_4D_nodal_values(self, var_name, var_info, nt=None):
+        if not (self.info["is3D"] and var_info["is3D"]):
+            return super().read_file_var_as_4D_nodal_values(var_name, var_info, nt=nt)
+        grid = self.grid
+        data = self.dataset.read_variable(var_name, nt=nt).data
+        if not var_info["time_varying"]:
+            data = data[np.newaxis, ...]
+        # (time, z, horizontal) -> (time, horizontal, z), surface-first FVCOM layers -> bottom-first
+        data = np.ascontiguousarray(np.flip(np.transpose(data, [0, 2, 1]), axis=2))
+        if "nele" in var_info["dims"]:
+            data = gt.get_nodal_values_from_weighted_cell_values(data, grid["node_to_tri_map"], grid["tri_per_node"],
+                                                                 grid["cell_center_weights"])
+        if "siglay" in var_info["dims"]:  # layer centres -> layer interfaces, as FVCOMreader does
+            data = gt.convert_layer_field_to_levels_from_interface_fractions_at_each_node(
+                data, grid["z_layer_fixed_fractions"], grid["z_interface_fractions"])
+        return data[:, :, :, np.newaxis]  # (time, node, z, component)
+
+
 class Windage(_VelocityModiferBase):
     """Adds a fixed fraction of the model's 10 m wind to each particle's velocity (floating material)."""
 

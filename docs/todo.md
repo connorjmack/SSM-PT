@@ -161,7 +161,9 @@ See plan.md decisions 10–19.
 - [x] "Lowest dilution over the run" is the summed field's peak, not each source's own peak added up
 - [ ] Open-boundary culling (Phase 2 task above) before any month-scale run
 - [ ] Longer windows through the Phase 1 data layer (`fields.ensure_hours`)
-- [ ] 3D layer check on the Sequim box: fixed-depth releases vs direct layer integration (layer-order hypothesis)
+- [x] 3D layer check on the Sequim box: fixed-depth releases vs direct layer integration (layer-order hypothesis confirmed; `SSCOFS3DReader` fixes it; `scripts/layer_check.py`)
+- [ ] Deep residual: 80 m down in 98 m water, OceanTracker moves ~14% less than direct layer integration (plan.md Risks)
+- [ ] Upstream issue to OceanTracker: `FVCOMreader` flips sigma fractions but not layer data
 - [ ] Kz from a Richardson-number scheme written as `A_Z_profile`
 - [ ] Trap-depth release; cull boundary inside the box; box-doubling sensitivity
 - [ ] Sequim WRF (WA0022349) as the second source
