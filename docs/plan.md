@@ -136,7 +136,7 @@ A web particle-tracking tool for the Salish Sea for WDFW and other semi-technica
 - The paper's theoretical Admiralty Inlet outfall (scenario TD1) is run only to compare against SSM and PLUMES output, which co-authors will share.
 
 ### 12. Plume runs are their own request type, not a particle class
-- `PlumeRequest` with `sources: list[Source]` (`max_length=1` until Phase C) and a grid spec; same engine, same submit/poll/fetch pattern, same page.
+- `PlumeRequest` with `sources: list[Source]` (1–6, pulled forward from Phase C on 2026-10-09) and a grid spec; same engine, same submit/poll/fetch pattern, same page.
 - Release schedule, behavior and output are separate concerns: a particle class says how material moves; a source says how much is released, when and where; a plume run outputs concentration, not tracks. Behaviors such as decay can later attach to a source.
 
 ### 13. Near field comes from PLUMES; this tool starts where it ends

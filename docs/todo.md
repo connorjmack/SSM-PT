@@ -159,6 +159,9 @@ See plan.md decisions 10–19.
 - [x] Lift the one-source limit (up to 6, all on one map); per-source share of concentration (frame and receptor `by_source`; blended dye colours in the UI)
 - [x] Failing test then fix: superposition (two sources together = sum of separate runs, within noise)
 - [x] "Lowest dilution over the run" is the summed field's peak, not each source's own peak added up
+- [ ] Run PLUMES for every coupled source in one process pool: `PlumeEngine.run` does them one source at a time, so 6 sources over 2 months would spend an estimated 25–30 min in the near field before particles start
+- [ ] Coarse whole-domain grid (1–2 km cells) beside the fine map, so effluent that leaves the fine map is still counted and drawn (the whole domain at 150 m is ~21 M cells, ~86 MB per saved map per source)
+- [ ] Server segfaulted once (exit 139) on a page load, during the first current-arrow requests; not reproduced in 7 tries. Suspect concurrent netCDF/HDF5 reads from FastAPI's thread pool: one lock around the reads would rule it out. Run the server with `python -X faulthandler -m uvicorn …` so a repeat logs a trace
 - [ ] Open-boundary culling (Phase 2 task above) before any month-scale run
 - [ ] Longer windows through the Phase 1 data layer (`fields.ensure_hours`)
 - [x] 3D layer check on the Sequim box: fixed-depth releases vs direct layer integration (layer-order hypothesis confirmed; `SSCOFS3DReader` fixes it; `scripts/layer_check.py`)
