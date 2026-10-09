@@ -1,4 +1,5 @@
 """Plume dilution tool: depth averaging, request validation, concentration from particle counts."""
+import math
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -32,6 +33,7 @@ def test_clipped_mesh_keeps_its_elements_nodes_and_renumbers_them():
 # ── Request model ──
 
 SOURCE = dict(lon=-123.0438, lat=48.0793, flow_m3s=0.1)
+WRF = dict(name="Sequim WRF", lon=-123.03739, lat=48.09126, flow_m3s=0.439)  # snapped outfall, 1.5 km from SOURCE
 REQ = dict(sources=[SOURCE], start="2026-07-01T00:00:00Z", duration_h=24)
 
 
@@ -41,12 +43,44 @@ def test_source_defaults_are_the_paper_near_field():
     assert s.near_field_dilution == 8.0 and s.plume_diameter_m == 1.6
 
 
-def test_one_source_only_for_now():
+def test_one_to_six_sources():
     from ssm_pt.engine.plume import PlumeRequest
+    assert len(PlumeRequest(**REQ | {"sources": [SOURCE, WRF]}).sources) == 2
     with pytest.raises(ValidationError):
-        PlumeRequest(**REQ | {"sources": [SOURCE, SOURCE]})
+        PlumeRequest(**REQ | {"sources": [SOURCE] * 7})
     with pytest.raises(ValidationError):
         PlumeRequest(**REQ | {"sources": []})
+
+
+def test_map_reaches_as_far_around_every_source_as_around_a_lone_one():
+    from ssm_pt.engine.plume import map_grid
+    centre, cols, rows = map_grid(np.array([[5e5, 5.3e6]]), 20, 150)
+    assert (cols, rows) == (133, 133) and centre.tolist() == [5e5, 5.3e6]  # one source: the square around it
+    xy = np.array([[5e5, 5.3e6], [5.2e5, 5.307e6]])  # 20 km apart east-west, 7 km north-south
+    centre, cols, rows = map_grid(xy, 20, 150)
+    w, s, e, n = centre[0] - cols * 75, centre[1] - rows * 75, centre[0] + cols * 75, centre[1] + rows * 75
+    for x, y in xy:  # half the map size from every edge, to within a cell of rounding
+        assert min(x - w, e - x, y - s, n - y) >= 10_000 - 150
+
+
+def test_map_too_big_is_rejected():
+    from ssm_pt.engine.plume import PlumeRequest
+    PlumeRequest(**REQ | {"sources": [SOURCE, SOURCE | {"lon": SOURCE["lon"] + 0.3}]})  # 22 km apart: fine
+    with pytest.raises(ValidationError, match="200 km"):  # about 186 km apart, plus 20 km of map around them
+        PlumeRequest(**REQ | {"sources": [SOURCE, SOURCE | {"lon": SOURCE["lon"] + 2.5}]})
+
+
+def test_peak_over_the_run_is_the_combined_field_at_its_peak(tmp_path):
+    from ssm_pt.engine.plume import PlumeRequest, plume_meta, read_fraction, write_plume_file
+    f = np.zeros((2, 2, 1, 1), np.float32)  # (time, source, row, col): source 0 peaks first, source 1 an hour later
+    f[:, 0, 0, 0], f[:, 1, 0, 0] = [0.01, 0.002], [0.001, 0.01]
+    req = PlumeRequest(**REQ | {"sources": [SOURCE, WRF]})
+    write_plume_file(tmp_path / "p.nc", np.array([0.0, 3600.0]), np.array([5e5]), np.array([5.3e6]), f,
+                     np.ones((2, 2)), np.ones((2, 2)), req)
+    # The combined peak is 0.012 in the second hour, not each source's own peak added up (0.02)
+    np.testing.assert_allclose(read_fraction(tmp_path / "p.nc", "max")[:, 0, 0], [0.002, 0.01])
+    np.testing.assert_allclose(read_fraction(tmp_path / "p.nc", "mean")[:, 0, 0], [0.006, 0.0055])
+    assert plume_meta(tmp_path / "p.nc", req, 1000)["min_dilution"] == pytest.approx(1 / 0.012)
 
 
 def test_time_step_defaults_to_300_s():
@@ -244,6 +278,33 @@ def test_coupled_near_field_runs_plumes_every_hour_and_caps_the_map(tmp_path):
     assert meta["min_dilution"] >= min(nf["dilution"]) * (1 - 1e-6)
 
 
+@needs_plume_data
+def test_sources_run_together_match_their_separate_runs(tmp_path):
+    """Superposition: sources share nothing in a run, so each one's map matches its own run within particle noise.
+    The grids differ (each is centred on its sources), so compare each map's total and centroid."""
+    import netCDF4
+
+    from ssm_pt.engine.plume import PlumeEngine, PlumeRequest
+    common = REQ | {"duration_h": 3}
+    engine = PlumeEngine(PLUME_DATA)
+    both = engine.run(PlumeRequest(**common | {"sources": [SOURCE, WRF], "n_particles": 4000}), tmp_path / "both")
+    alone = [engine.run(PlumeRequest(**common | {"sources": [s], "n_particles": 2000}), tmp_path / f"alone{i}")
+             for i, s in enumerate([SOURCE, WRF])]
+    assert both["released_m3"][-1] == pytest.approx(sum(a["released_m3"][-1] for a in alone), rel=1e-6)
+
+    def total_and_centroid(path, i):
+        with netCDF4.Dataset(path) as nc:
+            nc.set_auto_mask(False)
+            f, x, y = nc["fraction"][-1, i], nc["x"][:], nc["y"][:]
+        return f.sum(), (f.sum(axis=0) * x).sum() / f.sum(), (f.sum(axis=1) * y).sum() / f.sum()
+
+    for i in range(2):
+        t, cx, cy = total_and_centroid(tmp_path / "both/plume.nc", i)
+        t0, cx0, cy0 = total_and_centroid(tmp_path / f"alone{i}/plume.nc", 0)
+        assert t == pytest.approx(t0, rel=0.1)
+        assert math.hypot(cx - cx0, cy - cy0) < 300  # metres: two cells
+
+
 # ── API ──
 
 def test_contiguous_stops_at_the_first_gap():
@@ -287,24 +348,30 @@ def test_plume_outside_the_data_window_rejected(api):
     assert e.value.status_code == 422 and "available data" in e.value.detail
 
 
-def test_frame_and_receptor_of_a_finished_run(api):
+def fake_run(api, f, sources):
+    """A finished run 'fake' whose 3 x 3 grid of 150 m cells is centred on SOURCE, with fraction f."""
     from concurrent.futures import Future
-
-    from fastapi import HTTPException
 
     from ssm_pt.engine.oceantracker_engine import TO_UTM
     from ssm_pt.engine.plume import PlumeRequest, write_plume_file
     x0, y0 = TO_UTM.transform(SOURCE["lon"], SOURCE["lat"])
-    f = np.zeros((2, 1, 3, 3), np.float32)
-    f[1, 0, 1, 1] = 0.01  # the centre cell, holding the source, at the second output time
     jobs = api.app.state.plume_jobs
     out = jobs.out_dir("fake")
     out.mkdir(parents=True)
+    n = len(sources)
     write_plume_file(out / "plume.nc", np.array([0.0, 3600.0]), x0 + np.array([-150.0, 0, 150]),
-                     y0 + np.array([-150.0, 0, 150]), f, np.ones((2, 1)), np.ones((2, 1)), PlumeRequest(**REQ))
+                     y0 + np.array([-150.0, 0, 150]), f, np.ones((2, n)), np.ones((2, n)),
+                     PlumeRequest(**REQ | {"sources": sources}))
     done = Future()
     done.set_result({"rows": 3, "cols": 3})
     jobs.runs["fake"] = done
+
+
+def test_frame_and_receptor_of_a_finished_run(api):
+    from fastapi import HTTPException
+    f = np.zeros((2, 1, 3, 3), np.float32)
+    f[1, 0, 1, 1] = 0.01  # the centre cell, holding the source, at the second output time
+    fake_run(api, f, [SOURCE])
 
     assert api.plume_frame("fake", "0") == {"idx": [], "val": []}
     assert api.plume_frame("fake", "1") == {"idx": [4], "val": [0.01]}
@@ -315,3 +382,14 @@ def test_frame_and_receptor_of_a_finished_run(api):
         api.plume_receptor("fake", lon=-122.0, lat=47.0)
     with pytest.raises(HTTPException):
         api.plume_frame("unknown", "0")
+
+
+def test_frame_and_receptor_split_by_source(api):
+    f = np.zeros((2, 2, 3, 3), np.float32)
+    f[1, :, 1, 1] = [0.01, 0.03]  # both sources in the centre cell
+    f[1, 1, 1, 2] = 0.02  # only the second in the cell east of it
+    fake_run(api, f, [SOURCE, WRF])
+    assert api.plume_frame("fake", "1") == {"idx": [4, 5], "val": [0.04, 0.02], "by_source": [[0.01, 0.0], [0.03, 0.02]]}
+    r = api.plume_receptor("fake", lon=SOURCE["lon"], lat=SOURCE["lat"])
+    assert r["fraction"] == pytest.approx([0, 0.04])
+    assert np.allclose(r["by_source"], [[0, 0.01], [0, 0.03]])

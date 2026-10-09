@@ -156,8 +156,9 @@ See plan.md decisions 10–19.
 - [ ] Record the validation result in plan.md
 
 ### Phase C — multiple sources, long runs, 3D
-- [ ] Lift the one-source limit; per-source share of concentration
-- [ ] Failing test then fix: superposition (two sources together = sum of separate runs, within noise)
+- [x] Lift the one-source limit (up to 6, all on one map); per-source share of concentration (frame and receptor `by_source`; blended dye colours in the UI)
+- [x] Failing test then fix: superposition (two sources together = sum of separate runs, within noise)
+- [x] "Lowest dilution over the run" is the summed field's peak, not each source's own peak added up
 - [ ] Open-boundary culling (Phase 2 task above) before any month-scale run
 - [ ] Longer windows through the Phase 1 data layer (`fields.ensure_hours`)
 - [ ] 3D layer check on the Sequim box: fixed-depth releases vs direct layer integration (layer-order hypothesis)

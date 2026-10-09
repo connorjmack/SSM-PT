@@ -18,10 +18,12 @@ os.environ.setdefault("OCEANTRACKER_NUMBA_CACHING", "1")  # must be set before o
 
 import netCDF4
 import numpy as np
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, field_validator, model_validator
 
 H_MIN = 0.5  # m; floor on water depth so cells on drying flats do not divide by ~0
 RELEASE_INTERVAL_S = 600  # one pulse of particles every 10 min stands for that interval's discharge
+MAX_SOURCES = 6  # past this the map's per-source dye colours are hard to tell apart
+MAX_MAP_KM = 200  # longest side of the map
 FILE_NAME = re.compile(r"sscofs\.t(\d\d)z\.(\d{8})\.fields\.n(\d{3})\.nc$")
 NEAR_FIELD_REACH_M = 500  # a source farther than this from every 3D element is outside the Sequim box
 NF_FIELDS = ("dilution", "diameter_m", "trap_depth_m", "width_m", "current_m_s")  # hourly near-field outputs
@@ -80,14 +82,14 @@ class Source(BaseModel):
 
 class PlumeRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    sources: list[Source] = Field(min_length=1, max_length=1)  # several at once in Phase C
+    sources: list[Source] = Field(min_length=1, max_length=MAX_SOURCES)
     start: AwareDatetime
     duration_h: float = Field(gt=0, le=24 * 62)
     n_particles: int = Field(50_000, ge=1000, le=500_000)
     diffusivity_m2s: float = Field(1.0, ge=0, le=100)
     mixing_depth_m: float | None = Field(None, gt=0, le=500)  # None = whole water column
     cell_m: float = Field(150.0, ge=50, le=2000)
-    span_km: float = Field(20.0, ge=2, le=200)
+    span_km: float = Field(20.0, ge=2, le=MAX_MAP_KM)  # the map reaches half this far around each source
     output_interval_min: int = Field(60, ge=10, le=360)
     # Run time is mostly a fixed cost per step. 300 s matched 60 s within particle noise on a 3-day Sequim run
     # (scripts/plume_dt_check.py); OceanTracker follows particles across several cells in one step
@@ -104,6 +106,32 @@ class PlumeRequest(BaseModel):
         if RELEASE_INTERVAL_S % v:  # otherwise pulses fall between steps and the released volume drifts
             raise ValueError(f"the time step must divide the {RELEASE_INTERVAL_S} s release interval")
         return v
+
+    @model_validator(mode="after")
+    def _map_not_too_big(self):
+        if len(self.sources) > 1:  # memory and the result grow with the map's cells
+            _, cols, rows = map_grid(source_xy(self.sources), self.span_km, self.cell_m)
+            side = max(cols, rows) * self.cell_m / 1000
+            if side > MAX_MAP_KM:
+                raise ValueError(f"The map around these sources would be {side:.0f} km across, over the "
+                                 f"{MAX_MAP_KM} km limit; lower the map size or run far-apart sources separately.")
+        return self
+
+
+def source_xy(sources: list[Source]) -> np.ndarray:
+    """(source, 2) UTM 10N positions."""
+    from ssm_pt.engine.oceantracker_engine import TO_UTM
+
+    return np.array([TO_UTM.transform(s.lon, s.lat) for s in sources])
+
+
+def map_grid(xy: np.ndarray, span_km: float, cell_m: float) -> tuple[np.ndarray, int, int]:
+    """Centre, cols and rows of the map: the sources' bounding box plus span_km / 2 on every side, in whole cells,
+    so every source has the room a lone source gets (a span_km square around it)."""
+    reach = max(1, round(span_km * 1000 / cell_m))
+    lo, hi = xy.min(axis=0), xy.max(axis=0)
+    cols, rows = (np.round((hi - lo) / cell_m).astype(int) + reach).tolist()
+    return (lo + hi) / 2, cols, rows
 
 
 def effluent_fraction(count, depth_sum, volume_per_particle, cell_area, near_field_dilution, mixing_depth_m=None):
@@ -253,12 +281,9 @@ class PlumeEngine:
         from oceantracker.main import OceanTracker
         from oceantracker.read_output.python import load_output_files
 
-        from ssm_pt.engine.oceantracker_engine import TO_UTM
-
         out_dir = Path(out_dir)
-        xy = np.array([TO_UTM.transform(s.lon, s.lat) for s in req.sources])
-        n_cells = max(1, round(req.span_km * 1000 / req.cell_m))
-        span = n_cells * req.cell_m
+        xy = source_xy(req.sources)
+        centre, cols, rows = map_grid(xy, req.span_km, req.cell_m)
         duration_s = req.duration_h * 3600
         pulses = int(duration_s // RELEASE_INTERVAL_S) + 1
         pulse_size = max(1, round(req.n_particles / (pulses * len(req.sources))))
@@ -277,7 +302,7 @@ class PlumeEngine:
             ot.add_class("release_groups", name=f"source{i}", points=[[x, y]], start=start, duration=duration_s,
                          release_interval=RELEASE_INTERVAL_S, pulse_size=pulse_size, release_radius=float(radius[i]))
         ot.add_class("particle_statistics", name="grid", class_name="GriddedStats2D_timeBased",
-                     grid_center=xy.mean(axis=0).tolist(), rows=n_cells, cols=n_cells, span_x=span, span_y=span,
+                     grid_center=centre.tolist(), rows=rows, cols=cols, span_x=cols * req.cell_m, span_y=rows * req.cell_m,
                      update_interval=req.output_interval_min * 60, particle_property_list=["water_depth", "tide"])
         with tempfile.TemporaryDirectory() as hindcast:
             link_window(self.data_dir, req.start, end, Path(hindcast))
@@ -322,7 +347,11 @@ def write_plume_file(path: Path, time_s, x_c, y_c, f, released, on_grid, req: Pl
         v = nc.createVariable("fraction", "f4", ("time", "source", "row", "col"), zlib=True, complevel=1)
         v.setncatts({"long_name": "effluent volume fraction (1 / dilution), depth-averaged"})
         v[:] = f
-        nc.createVariable("fraction_max", "f4", ("source", "row", "col"), zlib=True)[:] = f.max(axis=0)
+        # Each source's share at the time the combined fraction peaks, so the shares add up to that peak
+        peak = f.sum(axis=1).argmax(axis=0)[None, None]  # (1, 1, row, col) time index
+        v = nc.createVariable("fraction_max", "f4", ("source", "row", "col"), zlib=True)
+        v.setncatts({"long_name": "each source's fraction at the time the summed fraction peaks"})
+        v[:] = np.take_along_axis(f, peak, axis=0)[0]
         nc.createVariable("fraction_mean", "f4", ("source", "row", "col"), zlib=True)[:] = f.mean(axis=0)
         nc.createVariable("released_m3", "f8", ("time", "source"))[:] = released
         nc.createVariable("on_grid_m3", "f8", ("time", "source"))[:] = on_grid
@@ -379,16 +408,18 @@ def plume_meta(path: Path, req: PlumeRequest, n_particles: int) -> dict:
 
 
 def read_fraction(path: Path, frame: int | str) -> np.ndarray:
-    """(row, col) effluent fraction summed over sources: one output time, or 'max' / 'mean' over the run."""
+    """(source, row, col) effluent fraction: one output time, or 'max' / 'mean' over the run ('max' is each
+    source's share when the summed fraction peaks)."""
     with netCDF4.Dataset(path) as nc:
         nc.set_auto_mask(False)
         if frame in ("max", "mean"):
-            return nc[f"fraction_{frame}"][:].sum(axis=0)
-        return nc["fraction"][int(frame)].sum(axis=0)
+            return nc[f"fraction_{frame}"][:]
+        return nc["fraction"][int(frame)]
 
 
 def read_receptor(path: Path, lon: float, lat: float) -> dict | None:
-    """Effluent fraction over time in the grid cell containing (lon, lat), or None outside the grid."""
+    """Effluent fraction over time in the grid cell containing (lon, lat), summed and (several sources) per
+    source, or None outside the grid."""
     from ssm_pt.engine.oceantracker_engine import TO_UTM
 
     x, y = TO_UTM.transform(lon, lat)
@@ -398,4 +429,8 @@ def read_receptor(path: Path, lon: float, lat: float) -> dict | None:
         c, r = math.floor((x - xc[0]) / cell + 0.5), math.floor((y - yc[0]) / cell + 0.5)
         if not (0 <= r < len(yc) and 0 <= c < len(xc)):
             return None
-        return {"row": r, "col": c, "fraction": nc["fraction"][:, :, r, c].sum(axis=1).round(9).tolist()}
+        f = nc["fraction"][:, :, r, c]  # (time, source)
+    out = {"row": r, "col": c, "fraction": f.sum(axis=1).round(9).tolist()}
+    if f.shape[1] > 1:
+        out["by_source"] = f.T.round(9).tolist()
+    return out

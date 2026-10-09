@@ -188,15 +188,21 @@ def plume_result(rid: str):
 @app.get("/plumes/{rid}/frame/{frame}")
 def plume_frame(rid: str, frame: str):
     """Effluent fraction (1 / dilution) on the grid, sparse: flat row-major indices of non-empty cells and
-    their values. frame is an output index, or 'max' / 'mean' over the run."""
+    their values summed over sources (plus by_source, when there are several). frame is an output index, or
+    'max' / 'mean' over the run."""
     if frame not in ("max", "mean") and not frame.isdigit():
         raise HTTPException(422, "frame must be an output index, 'max' or 'mean'")
     try:
-        f = read_fraction(plume_file(rid), frame).ravel()
+        f = read_fraction(plume_file(rid), frame)
     except IndexError:
         raise HTTPException(404, "No such frame")
-    idx = np.flatnonzero(f > 0)
-    return {"idx": idx.tolist(), "val": [float(f"{v:.4g}") for v in f[idx]]}
+    f = f.reshape(len(f), -1)  # (source, cell)
+    total = f.sum(axis=0)
+    idx = np.flatnonzero(total > 0)
+    out = {"idx": idx.tolist(), "val": [float(f"{v:.4g}") for v in total[idx]]}
+    if len(f) > 1:  # each source's values in the same cells, for the per-source colours and TA/DIC
+        out["by_source"] = [[float(f"{v:.4g}") for v in row[idx]] for row in f]
+    return out
 
 
 @app.get("/plumes/{rid}/receptor")
