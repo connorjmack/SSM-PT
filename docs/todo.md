@@ -77,3 +77,73 @@ Seeded from `plan.md` phases. Mark `[x]` as done; archive closed phases.
 - [ ] Provision VM in us-east-1; serve API + static frontend
 - [ ] Pre-fill cache on the VM; smoke-test end to end
 - [ ] Run sessions with WDFW users; log feedback in plan.md
+
+## Plume dilution tool (Sequim Bay)
+See plan.md decisions 10–19.
+
+### Waiting on others
+- [ ] PNNL-Sequim outfall details: flow, port depth, diffuser design, effluent TA/DIC/temperature/salinity
+- [ ] Near-field values at Sequim: PLUMES run from co-authors, or agreed estimates (initial dilution, plume diameter, plume depth)
+- [ ] From co-authors: SSM TD1/TA40 Jul–Aug output and the PLUMES Admiralty Inlet runs
+
+### Phase A — data
+- [ ] Write `scripts/fetch_3d.py`: all 10 layers of u/v/ww/temp/salinity plus zeta and sigma grid for an hour range (reuse `nowcast_key` and the blockcache read in `scripts/fetch_surface.py`)
+- [ ] Failing test: depth average of u/v on a synthetic sigma column equals the layer-thickness-weighted mean
+- [ ] Implement depth averaging until green
+- [ ] Write full-domain depth-averaged files to `data/plume/davg/` in the slim2d layout; confirm `SSCOFS2DReader` runs on one
+- [ ] Write the clipped Sequim-box 3D files to `data/plume/sequim3d/` (for Phase C)
+- [ ] Fetch a 1-day test window; record bytes transferred, file sizes and wall time in architecture.md
+- [ ] Fetch 2026-07-01 to 2026-08-31 (1,488 h)
+- [ ] Tidal-jet check at the bay entrance: particle speed vs element velocity; pick dt from a CFL check; record in plan.md
+
+### Phase A — engine
+- [ ] Failing tests for `PlumeRequest`/`Source` in `backend/tests/test_plume.py` (one source max, flow > 0, dilution ≥ 1, run inside the data window)
+- [ ] Implement `PlumeRequest` and `Source` in `backend/ssm_pt/engine/plume.py`
+- [ ] Build a synthetic uniform-flow mesh file for tests
+- [ ] Failing test: continuous point source in uniform flow matches the analytical Gaussian plume
+- [ ] Adapter: one release group per source, continuous release (`release_interval`, `duration`), release cloud from near-field diameter
+- [ ] Particle property carrying ΔTA and ΔDIC mass
+- [ ] `GriddedStats2D` on a shared UTM grid; concentration C = Σm / (A·H); Gaussian test green
+- [ ] Failing test then fix: mass budget (released = in domain + culled)
+- [ ] Particle count from release rate × duration; plume-run particle cap separate from `RunRequest`
+
+### Phase A — results and API
+- [ ] Write per-source gridded fields per frame (NetCDF) under `runs/plume/<id>/`
+- [ ] Separate plume job queue with progress reporting
+- [ ] Endpoints: `POST /plumes`, `GET /plumes/{id}`, frame, summary (max, percentiles), receptor time series
+- [ ] API tests with `TestClient` and a fake plume engine
+
+### Phase A — outfalls
+- [ ] `scripts/build_outfalls.py`: read marine-energy POTW outfalls and candidate sites, keep marine ones inside the wet mesh, snap to nearest wet element, write `data/outfalls.geojson` with snap distance
+- [ ] `GET /outfalls`
+
+### Phase A — UI (`frontend/index.html`)
+- [ ] Plume mode toggle alongside particle mode
+- [ ] Outfall layer; click an outfall or the water to add a source
+- [ ] Source panel: flow, start/end, near-field dilution/diameter/depth, ΔTA, ΔDIC
+- [ ] Log-scale dilution heat map with playback
+- [ ] Receptor points: click to add, time series chart
+- [ ] Caveats: depth-averaged = upper bound on dilution; screening only; near field from PLUMES
+
+### Phase A — verify
+- [ ] `uv run pytest` passes
+- [ ] Manual: 2-month Sequim run in the browser; check the effluent-mass-in-bay series
+
+### Phase B — chemistry and validation
+- [ ] Add pinned `PyCO2SYS` to `pyproject.toml`
+- [ ] Decide background TA (salinity regression) and DIC source (SSM output or observations); record in plan.md
+- [ ] Failing test: pH from summed ΔTA/ΔDIC differs from summed ΔpH and matches PyCO2SYS reference values
+- [ ] Per-cell pH, Ω_ar and ΔpH from cell-mean TA/DIC
+- [ ] ΔpH and Ω layers in the UI; area above a threshold
+- [ ] Run Admiralty TD1 for Jul–Aug; compare ΔpH with SSM Jul–Aug mean and dilution with PLUMES Table 2
+- [ ] Record the validation result in plan.md
+
+### Phase C — multiple sources, long runs, 3D
+- [ ] Lift the one-source limit; per-source share of concentration
+- [ ] Failing test then fix: superposition (two sources together = sum of separate runs, within noise)
+- [ ] Open-boundary culling (Phase 2 task above) before any month-scale run
+- [ ] Longer windows through the Phase 1 data layer (`fields.ensure_hours`)
+- [ ] 3D layer check on the Sequim box: fixed-depth releases vs direct layer integration (layer-order hypothesis)
+- [ ] Kz from a Richardson-number scheme written as `A_Z_profile`
+- [ ] Trap-depth release; cull boundary inside the box; box-doubling sensitivity
+- [ ] Sequim WRF (WA0022349) as the second source

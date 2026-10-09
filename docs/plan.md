@@ -6,7 +6,9 @@ A web particle-tracking tool for the Salish Sea for WDFW and other semi-technica
 
 **Prototype scope:** one day of hourly nowcast data (2026-10-04), surface currents only.
 
-**Later features (design must not block these):** forecast mode, 3D / fixed depth (needed for sinking particles and larvae), backtracking, connectivity / polygon statistics, longer archive.
+**Later features (design must not block these):** forecast mode, 3D / fixed depth (needed for sinking particles and larvae), backtracking, connectivity / polygon statistics, longer archive, multi-source plume runs.
+
+**Second product:** a plume dilution tool for ocean alkalinity enhancement (OAE) effluent, in the same page and on the same engine. See [Plume dilution tool](#plume-dilution-tool-sequim-bay).
 
 ## Decisions
 
@@ -119,3 +121,94 @@ A web particle-tracking tool for the Salish Sea for WDFW and other semi-technica
 - **Prototype:** a WDFW user can draw a point or polygon release on 2026-10-04, run 500 particles, play the result back and download GeoJSON/CSV without help.
 - **Latency (target, confirm after Phase 0):** a 500-particle, 24 h run returns in under ~1 min on a warm worker with a warm cache.
 - Cache fill is idempotent and atomic; concurrent requests for the same hours never see partial files.
+
+## Plume dilution tool (Sequim Bay)
+
+**Goal:** model the far-field dilution of OAE effluent, as in Savoie et al. (`marine-energy/assets/Manuscript_Formatted_AMSavoie_v1.pdf`): a near-field plume model (PLUMES2.0v1) hands off to a far-field model (there, the Salish Sea Model, SSM). Users click to add sources on the same Leaflet page. One source first; several sources at once is the target, and larger-scale OAE later.
+
+### 10. Scope: dilution, exposure and siting screening; not CDR efficiency
+- Outputs: dilution and ΔTA/ΔDIC maps, then ΔpH and Ω maps, time series at receptor points, area above a threshold, date windows that can be matched to species-sensitive periods (paper Figure 9).
+- Air–sea CO₂ uptake (CDR efficiency) stays with SSM. Its flux depends on each cell's pCO₂, which depends on how many particles share the cell, so it needs an Eulerian step coupled back to the particles; SSM-ICM already does this, with biology. This tool screens sites and scenarios worth running in SSM.
+
+### 11. Site: Sequim Bay; Admiralty Inlet only as a validation case
+- First source: PNNL-Sequim MCRL, 48.0793 N, -123.0438 E (`candidate_sites.csv`; no flow or NPDES record, so flow, port depth and effluent chemistry are user inputs).
+- Mesh in the bay (48.00–48.10 N, 123.08–122.98 W): ~1,700 elements, median edge ~160 m, depths 0.7–39 m.
+- The paper's theoretical Admiralty Inlet outfall (scenario TD1) is run only to compare against SSM and PLUMES output, which co-authors will share.
+
+### 12. Plume runs are their own request type, not a particle class
+- `PlumeRequest` with `sources: list[Source]` (`max_length=1` until Phase C) and a grid spec; same engine, same submit/poll/fetch pattern, same page.
+- Release schedule, behavior and output are separate concerns: a particle class says how material moves; a source says how much is released, when and where; a plume run outputs concentration, not tracks. Behaviors such as decay can later attach to a source.
+
+### 13. Near field comes from PLUMES; this tool starts where it ends
+- Each source takes PLUMES outputs: initial (flux-averaged) dilution, plume diameter, plume depth. Particles start as a cloud of that size at C₀/S₀.
+- Acute (~6 m) and chronic (~62 m) mixing-zone metrics stay with PLUMES; they are smaller than a model cell. Releasing particles at a point would make near-source concentration depend on grid cell size.
+- A built-in buoyant-jet model is a later option, not planned.
+
+### 14. Tracers: ΔTA and ΔDIC as conservative mass; chemistry computed after summing
+- Each particle carries ΔTA and ΔDIC mass (discharge × excess concentration × release interval / particles per pulse).
+- Gridded on one shared regular UTM grid with OceanTracker `GriddedStats2D` (`release_group_centered_grids=False`): counts per release group and property sums give mass per source per cell.
+- Sources superpose as ΔTA and ΔDIC. pH and Ω are nonlinear, so they are computed per cell from (background + summed Δ) with PyCO2SYS (Phase B); never averaged across particles or summed across sources.
+- Superposition holds for conservative or first-order-decaying tracers whose near fields don't merge.
+
+### 15. Vertical: depth-averaged first, 3D behind a gate
+- Phase A: depth-averaged currents on the full domain, C = Σm / (A·H). Assumes a fully mixed water column, so it is the upper bound on dilution (least conservative); the UI says so. Optional surface mixing depth for stratified cases.
+- SSCOFS has no depth-averaged velocity (`ua`/`va` absent); compute it from the 10 layers weighted by sigma-layer thickness.
+- Full domain avoids clipping: a clipped mesh's edges act as coast in OceanTracker (particles pile up there, and effluent that leaves on the ebb never returns on the flood).
+- 3D (Phase C) runs on a clipped Sequim box only after the layer check in Risks passes.
+
+### 16. Data: one fetch, two products; Jul–Aug 2026
+- Fetch all 10 layers of `u`, `v`, `ww`, `temp`, `salinity`, plus `zeta` and the sigma grid, for 2026-07-01 to 2026-08-31 (1,488 h; matches the paper's representative cases and leaves time for build-up in the bay).
+- Write (a) full-domain depth-averaged 2D files in the slim2d layout, so `SSCOFS2DReader` reads them unchanged (~5 MB/h, ~7 GB), and (b) clipped Sequim-box 3D files for Phase C.
+- Estimated transfer ~80 MB/h (~120 GB once); u/v/ww chunks span a third of the domain each, so a spatial box does not reduce reads. Measure on a 1-day test fetch first.
+- Time step from a CFL check at the bay entrance (max speed × dt below the smallest element there), not the tracker's 120 s default.
+
+### 17. Results stay on disk; the browser gets fields, not tracks
+- `jobs.py` returns whole results through the process pool and keeps them in memory; `/runs/{id}/tracks` sends every particle. A plume needs 10⁵–10⁶ particles, so that would be gigabytes.
+- Plume runs write gridded fields per source per frame (NetCDF) under `runs/plume/<id>/`. The API serves one frame, summary maps (max, percentiles), receptor time series and a small particle sample.
+- Plume runs get their own job queue with progress, so a long run doesn't block particle runs.
+
+### 18. Outfalls come from the marine-energy repo
+- Sources: `data/water_infra/npdes_potw_outfalls.geojson` (301 POTW outfalls in a Salish Sea box) and `data/candidate_sites.csv` (1,845 sites in the box, 81 with a flow).
+- Filter to marine discharges inside the SSCOFS wet mesh (the POTW set includes river outfalls, e.g. Burlington WWTP on the Skagit, 15 km inland). Snap each to the nearest wet element and show the snap distance. Pre-fill only fields the data has; flows are often missing and port depth and diffuser design never present.
+- A one-off script builds `data/outfalls.geojson`; clicking an outfall adds it as a source.
+
+### 19. Validation
+- Synthetic: Gaussian plume for a continuous point source in uniform flow; mass budget (released = in domain + culled + decayed); superposition (two sources together = sum of separate runs, within noise).
+- Admiralty Inlet TD1 (paper): effluent 13.5–65.3 MGD (0.6–2.9 m³/s), TA ~7,600 µmol/kg, DIC 4,312 µmol/kg, pH 9.55. PLUMES gives flux-averaged dilution 7.5–8.5 at the plume surfacing (diameter ~1.6 m, depth 0.79 m) and 7.5–9.6 at the chronic mixing zone (62 m). Compare our ΔpH with SSM's Jul–Aug mean from co-authors (paper Figure 8 is an annual mean, so not directly comparable).
+
+### Plume phases
+
+| # | Phase | Exit criterion |
+|---|---|---|
+| A | Jul–Aug depth-averaged data; `PlumeRequest` with one source and PLUMES inputs; ΔTA/ΔDIC gridding to disk; outfall layer; plume mode in the page (click to add a source, dilution heat map, receptors) | Synthetic tests pass; tidal-jet blurring at the bay entrance quantified; 2-month Sequim run shown in the browser |
+| B | Background TA/DIC; PyCO2SYS (approved); ΔpH and Ω maps; Admiralty TD1 run | Nonlinearity test passes; TD1 ΔpH matches SSM's footprint and order of magnitude |
+| C | Several sources (per-source shares); open-boundary culling; longer windows via the Phase 1 data layer; 3D gate on the Sequim box; Sequim WRF (WA0022349) as second source | Superposition test passes; month-scale multi-source run; 3D layer check passes or the fallback is chosen |
+
+### Plume risks
+- **OceanTracker 3D path:** Phase 0 surface particles moved 3–7× too slowly. Hypothesis (untested): layer order. FVCOM stores layers surface-first (`siglay[0] = -0.0158`); if the reader indexes them bottom-first, surface particles get near-bottom velocities. Test with fixed-depth releases against direct integration of each layer's velocity. Fallbacks: reader subclass fix, own vertical interpolation, or the numba tracker.
+- **No vertical diffusivity in SSCOFS** (`kh`/`km` absent). OceanTracker takes a constant `A_V` or an `A_Z_profile` field (with the Visser drift correction). Plan: Kz from a Richardson-number scheme (shear from u/v layers, N² from temp/salinity) at fetch time. Largest single uncertainty in 3D.
+- **Horizontal diffusivity uncalibrated:** results depend strongly on `A_H`; run sensitivity cases and label output as screening.
+- **Particle noise:** relative noise in a cell scales as 1/√n, worst at high dilution where thresholds sit. Size the particle count from release rate × duration; coarser cells or kernel smoothing far from the source; flag noisy cells.
+- **Build-up in an enclosed bay:** Sequim Bay's flushing time may be longer than the window. Plot effluent mass in the bay over time and say whether it levelled off.
+- **Tidal jets:** element velocities are IDW-interpolated to nodes (see Risks above), which may blur the bay-entrance jet.
+- **Outfall data quality:** NPDES coordinates may be the plant, not the diffuser (Sequim WRF has two pairs: 48.0914, -123.0364 and 48.0803, -123.0842).
+- **Ocean edges act as coast:** over month-scale runs, alkalinity that should leave via the Strait of Juan de Fuca piles up at the shelf edge. Open-boundary culling (Phase 2 todo) is required before Phase C long runs.
+- **Download size:** ~120 GB for Jul–Aug; better done on the us-east-1 VM if the laptop link is slow.
+
+### Plume open questions
+- PNNL outfall: flow, port depth, diffuser design, effluent TA, DIC, temperature and salinity.
+- Near-field values at Sequim: a PLUMES run from co-authors, or agreed estimates.
+- Background chemistry: TA from a regional salinity regression; DIC from SSM output or observations.
+- Exposure thresholds: which pH / Ω values and averaging times matter.
+- Concentration grid cell size (no smaller than the mesh, ~150 m in the bay).
+
+### Plume success criteria
+- Synthetic Gaussian-plume, mass-budget and (Phase C) superposition tests pass.
+- A 2-month Sequim run shows dilution maps and an effluent-mass-in-bay series that either levels off or is flagged as not levelled off.
+- Admiralty TD1 ΔpH matches SSM's Jul–Aug footprint and order of magnitude.
+
+## Changelog
+
+| Date | Change | Rationale |
+|---|---|---|
+| 2026-10-08 | Added plume dilution tool (Sequim Bay OAE effluent): decisions 10–19, phases A–C, risks, open questions | Audit of the particle-plume sketch; OAE purpose per Savoie et al.; site, validation case, window and PyCO2SYS decided by the user |
