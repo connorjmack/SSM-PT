@@ -273,9 +273,12 @@ class PlumeEngine:
                              "scripts/fetch_3d.py --clip, or use fixed near-field values.")
         element, dist = nearest_element(files[0], x, y)
         if dist > NEAR_FIELD_REACH_M:
-            raise ValueError(f"The PLUMES near field needs 3D currents and T/S, which cover Sequim Bay only; this "
-                             f"source is {dist / 1000:.1f} km outside them. Use fixed near-field values here.")
-        return near_field_series(files, element, s.diffuser, s.flow_m3s)
+            raise ValueError(f"{s.name}: the PLUMES near field needs 3D currents and T/S, which cover Sequim Bay only; "
+                             f"this source is {dist / 1000:.1f} km outside them. Use fixed near-field values for it.")
+        try:
+            return near_field_series(files, element, s.diffuser, s.flow_m3s)
+        except ValueError as e:  # with several sources, say which one to fix
+            raise ValueError(f"{s.name}: {e}") from e
 
     def run(self, req: PlumeRequest, out_dir: Path) -> dict:
         from oceantracker.main import OceanTracker

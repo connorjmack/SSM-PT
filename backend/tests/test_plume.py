@@ -330,6 +330,22 @@ def test_3d_reader_puts_surface_currents_at_the_surface(tmp_path):
 
 
 @needs_plume_data
+@needs_sequim_3d
+@pytest.mark.parametrize("where, diffuser", [
+    (dict(lon=-122.78355, lat=48.14304), {}),  # Port Townsend: about 5 km east of the Sequim 3D box
+    (PNNL, {"port_depth_m": 50}),  # ports below the ~7 m seabed: every hour fails
+])
+def test_near_field_errors_name_the_source(where, diffuser):
+    """With several sources, an error must say which one to fix."""
+    from ssm_pt.engine.oceantracker_engine import TO_UTM
+    from ssm_pt.engine.plume import Diffuser, PlumeEngine, Source
+    s = Source(**{"flow_m3s": 0.01} | where | {"name": "Outfall X", "diffuser": Diffuser(**diffuser)})
+    start = datetime(2026, 7, 1, 1, tzinfo=UTC)
+    with pytest.raises(ValueError, match="^Outfall X"):
+        PlumeEngine(PLUME_DATA).near_field(s, *TO_UTM.transform(s.lon, s.lat), start, start + timedelta(hours=1))
+
+
+@needs_plume_data
 def test_sources_run_together_match_their_separate_runs(tmp_path):
     """Superposition: sources share nothing in a run, so each one's map matches its own run within particle noise.
     The grids differ (each is centred on its sources), so compare each map's total and centroid."""
