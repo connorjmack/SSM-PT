@@ -7,7 +7,9 @@ from pathlib import Path
 os.environ.setdefault("OCEANTRACKER_NUMBA_CACHING", "1")  # must be set before oceantracker import
 
 import numpy as np
+from numba.core.caching import NullCache
 from oceantracker.main import OceanTracker
+from oceantracker.particle_properties.util import particle_comparisons_util
 from oceantracker.read_output.python import load_output_files
 from oceantracker.reader.FVCOM_reader import FVCOMreader
 from oceantracker.reader.util import hydromodel_grid_transforms as gt
@@ -22,6 +24,11 @@ from ssm_pt.engine.base import Decaying, Floating, RunRequest
 
 TO_UTM = Transformer.from_crs("EPSG:4326", "EPSG:32610", always_xy=True)
 TO_LONLAT = Transformer.from_crs("EPSG:32610", "EPSG:4326", always_xy=True)
+
+# These take a numba function as an argument, so numba never finds them in its disk cache from another process:
+# each new process compiled them again and added an index entry, until saving the index crashed (~130 entries)
+for _f in (particle_comparisons_util._prop_compared_to_value, particle_comparisons_util._prop_subset_compared_to_value):
+    _f._cache = NullCache()
 
 # Our own particle status: below OceanTracker's alive range (>= -1), so nothing moves or refloats it,
 # and above "dead" (-5), so tracks keep recording it

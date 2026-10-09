@@ -64,7 +64,7 @@ A web particle-tracking tool for the Salish Sea for WDFW and other semi-technica
 
 ### 8. Environment: uv, `pyproject.toml` at repo root, `uv.lock`; no conda
 - Every dependency, including OceanTracker (pip-only), has PyPI wheels.
-- All direct dependencies pinned with `==`; Python 3.12.
+- All direct dependencies pinned with `==`; Python 3.13.
 
 ### 9. Hosting: a VM in us-east-1, next to the bucket
 
@@ -140,9 +140,16 @@ A web particle-tracking tool for the Salish Sea for WDFW and other semi-technica
 - Release schedule, behavior and output are separate concerns: a particle class says how material moves; a source says how much is released, when and where; a plume run outputs concentration, not tracks. Behaviors such as decay can later attach to a source.
 
 ### 13. Near field comes from PLUMES; this tool starts where it ends
-- Each source takes PLUMES outputs: initial (flux-averaged) dilution, plume diameter, plume depth. Particles start as a cloud of that size at C₀/S₀.
+- Each source takes PLUMES outputs: initial (flux-averaged) dilution, plume diameter, plume depth. Particles start as a cloud of that diameter.
+- Depth-averaged (as built): spreading the effluent over a ~150 m cell and the whole water column already dilutes it far beyond the near field, so the near-field dilution acts only as a cap (a cell's effluent fraction never exceeds 1/S₀). Plume depth matters once 3D exists.
 - Acute (~6 m) and chronic (~62 m) mixing-zone metrics stay with PLUMES; they are smaller than a model cell. Releasing particles at a point would make near-source concentration depend on grid cell size.
-- A built-in buoyant-jet model is a later option, not planned.
+- Coupled near field (planned 2026-10-09): run UM3 hourly at each source on SSCOFS current and T/S profiles from the Sequim-box files, through Ebb Carbon's `plumes2` (MIT Python port of PLUMES2.0, checked against the exe; the PLUMES2.0 release is a GUI-only Windows executable with no source). Gives hourly initial dilution, plume width, trap depth and chemistry at the mixing-zone edges. In depth-averaged mode it changes only the cap at the outfall cells; trap depth matters in 3D. `plumes2` needs Python ≥3.13, so the project moved to 3.13 (2026-10-09): one environment, since OceanTracker passes the full suite on 3.13 and a second environment would add upkeep for no gain. Built 2026-10-09 with these choices:
+  - One run per hour, in parallel, not a lookup table: a run takes about 1.6 s and the profile (stratification as well as current) changes every hour.
+  - The port is fixed below mean sea level, so its depth below the surface follows the tide. The profile is the source element's layers plus the surface and seabed.
+  - The jets point downstream each hour unless a compass bearing is given; the effluent T and S default to the water at the port (seawater intake, as for PNNL and Ebb's Macoma runs).
+  - plumes2 defaults otherwise, including the termination rule (second local maximum rise or fall). Ebb's Macoma runs used the third, which gives higher dilution (720 vs 890 in one Sequim hour); the default is the cautious choice. Far field off: OceanTracker is the far field.
+  - A failed hour is reported and bridged from the hours around it. Sources more than 500 m from every Sequim-box element are refused.
+  - Defaults are Ebb's Macoma diffuser and flow (25 × 12.7 mm ports at 0.61 m, 45° up, 2 m deep, 5.9 m³/h) as a placeholder for PNNL-Sequim.
 
 ### 14. Tracers: ΔTA and ΔDIC as conservative mass; chemistry computed after summing
 - Each particle carries ΔTA and ΔDIC mass (discharge × excess concentration × release interval / particles per pulse).
@@ -156,11 +163,11 @@ A web particle-tracking tool for the Salish Sea for WDFW and other semi-technica
 - Full domain avoids clipping: a clipped mesh's edges act as coast in OceanTracker (particles pile up there, and effluent that leaves on the ebb never returns on the flood).
 - 3D (Phase C) runs on a clipped Sequim box only after the layer check in Risks passes.
 
-### 16. Data: one fetch, two products; Jul–Aug 2026
-- Fetch all 10 layers of `u`, `v`, `ww`, `temp`, `salinity`, plus `zeta` and the sigma grid, for 2026-07-01 to 2026-08-31 (1,488 h; matches the paper's representative cases and leaves time for build-up in the bay).
-- Write (a) full-domain depth-averaged 2D files in the slim2d layout, so `SSCOFS2DReader` reads them unchanged (~5 MB/h, ~7 GB), and (b) clipped Sequim-box 3D files for Phase C.
-- Estimated transfer ~80 MB/h (~120 GB once); u/v/ww chunks span a third of the domain each, so a spatial box does not reduce reads. Measure on a 1-day test fetch first.
-- Time step from a CFL check at the bay entrance (max speed × dt below the smallest element there), not the tracker's 120 s default.
+### 16. Data: depth-averaged domain plus a 3D Sequim box; Jul–Aug 2026
+- Window 2026-07-01 to 2026-08-31 (1,488 h; matches the paper's representative cases and leaves time for build-up in the bay).
+- As built (Phase A): read all 10 layers of `u`, `v` (~42 MB/h from S3, ~10 s per hour per worker) and write full-domain depth-averaged files in the slim2d layout, so `SSCOFS2DReader` reads them unchanged (zlib, 10.5 MB/h, ~16 GB for the window; the grid variables repeat in every file).
+- Sequim-box 3D files, a second pass (`fetch_3d.py --clip` → `data/plume/sequim3d/`): `u`, `v`, `ww`, `temp`, `salinity` on all layers plus `zeta`, for element centres in lon −123.20 to −122.85, lat 48.00 to 48.20 (Dungeness Spit to Protection Island; 10,489 elements, 5,736 nodes; 1.6 MB/h stored). Fetched now for the near-field profiles (decision 13); Phase C uses them too. The box's mesh indices span two of the three u/v chunks, so a smaller box would not read less.
+- Time step: 300 s by default, settable per run (30 s to 10 min, dividing the 600 s release interval). A CFL check at the bay entrance gave 60 s (1.3 m/s peak, 91 m shortest edge), but OceanTracker follows particles across several cells in one step, and on a 3-day Sequim run 300 s differed from 60 s by 6.4% in the time-mean field against 6.0% between two 60 s runs (`scripts/plume_dt_check.py`). Run time is mostly a fixed ~8 ms per step, so 300 s is ~2.6× faster for 3 days and ~5× for 2 months.
 
 ### 17. Results stay on disk; the browser gets fields, not tracks
 - `jobs.py` returns whole results through the process pool and keeps them in memory; `/runs/{id}/tracks` sends every particle. A plume needs 10⁵–10⁶ particles, so that would be gigabytes.
@@ -212,3 +219,6 @@ A web particle-tracking tool for the Salish Sea for WDFW and other semi-technica
 | Date | Change | Rationale |
 |---|---|---|
 | 2026-10-08 | Added plume dilution tool (Sequim Bay OAE effluent): decisions 10–19, phases A–C, risks, open questions | Audit of the particle-plume sketch; OAE purpose per Savoie et al.; site, validation case, window and PyCO2SYS decided by the user |
+| 2026-10-08 | Decisions 13 and 16 updated to the Phase A build: near-field dilution is a cap in depth-averaged mode; fetch is u/v only for now (measured 42 MB/h read, 10.5 MB/h stored) | Measured during the build; 3D variables deferred until Phase C needs them |
+| 2026-10-08 | Decision 16: plume time step 300 s by default (was 60 s from CFL), settable per run | dt check: 300 s within particle noise of 60 s; run time scales with step count, so runs are 2.6–5× faster |
+| 2026-10-09 | Decision 13: near field to be coupled hourly through `plumes2` (was: no built-in model). Decision 16: Sequim-box 3D files fetched now, not at Phase C | User asked for near-field resolution; PLUMES2.0 itself is GUI-only; UM3 needs current and T/S profiles at the outfall |

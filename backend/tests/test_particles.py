@@ -46,6 +46,15 @@ def test_parameters_of_other_classes_rejected():
         RunRequest(**BASE, particle={"type": "water", "windage_pct": 3})
 
 
+def test_comparison_kernels_skip_the_disk_cache():
+    """They take a numba function as an argument, so numba can never reuse their cache from another process."""
+    import ssm_pt.engine.oceantracker_engine  # noqa: F401  first: it turns numba caching on
+    from numba.core.caching import NullCache
+    from oceantracker.particle_properties.util import particle_comparisons_util as c
+
+    assert all(isinstance(f._cache, NullCache) for f in (c._prop_compared_to_value, c._prop_subset_compared_to_value))
+
+
 # ── Engine runs on the local SSCOFS files (about 10 s each) ──
 
 needs_data = pytest.mark.skipif(not any(DATA.glob("*.nc")), reason=f"no SSCOFS files in {DATA}")

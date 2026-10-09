@@ -148,8 +148,8 @@
   .sw-dot { display: inline-block; border-radius: 50%; border: 1px solid white; box-shadow: 0 0 0 0.5px #999; }
   .sw-line { display: inline-block; width: 14px; height: 0; border-top: 2px solid #f77f00; vertical-align: middle; }
 
-  /* Playback bar (bottom centre) */
-  #player {
+  /* Playback bar (bottom centre); one for particle runs, one for plume runs */
+  .player {
     position: absolute;
     bottom: 26px;
     left: 50%;
@@ -161,7 +161,7 @@
     width: min(600px, calc(100% - 32px));
     padding: 8px 12px;
   }
-  #player button {
+  .player button {
     flex-shrink: 0;
     width: 30px;
     height: 30px;
@@ -172,15 +172,35 @@
     border-radius: 50%;
     cursor: pointer;
   }
-  #player input[type=range] { flex: 1; accent-color: #0077b6; }
-  #player .time { font-size: 11.5px; line-height: 1.3; white-space: nowrap; font-variant-numeric: tabular-nums; }
-  #player .time .local { color: #777; }
+  .player input[type=range] { flex: 1; accent-color: #0077b6; }
+  .player .time { font-size: 11.5px; line-height: 1.3; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .player .time .local { color: #777; }
+
+  /* Tool switch (top of the panel) */
+  .tabs { display: flex; gap: 4px; margin-bottom: 10px; padding: 3px; background: #eef1f4; border-radius: 6px; }
+  .tabs button {
+    flex: 1;
+    padding: 5px 6px;
+    font: inherit;
+    font-weight: 600;
+    color: #555;
+    background: none;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+  .tabs button[aria-selected=true] { color: #1a1a2e; background: white; box-shadow: 0 1px 3px rgba(0,0,0,0.15); }
 </style>
 </head>
 <body>
 <aside id="panel" class="panel">
-  <h1>Salish Sea Model Particle Tracking</h1>
+  <h1 id="title">Salish Sea Model Particle Tracking</h1>
+  <div class="tabs" role="tablist">
+    <button id="tab-particle" role="tab" aria-selected="true">Particle tracking</button>
+    <button id="tab-plume" role="tab" aria-selected="false">Plume dilution</button>
+  </div>
 
+  <div id="mode-particle">
   <details class="section" open>
     <summary>1 · Release</summary>
     <div class="section-body">
@@ -260,11 +280,14 @@
       <li>Prototype: only <span id="about-window">a few hours</span> of data are loaded.</li>
     </ul>
   </details>
+  </div>
+
+  <div id="mode-plume" hidden></div>  <!-- filled by plume.js -->
 </aside>
 
 <main id="main">
   <div id="map"></div>
-  <div id="player" class="card">
+  <div id="player" class="card player">
     <button id="play" title="Play / pause">▶</button>
     <input id="slider" type="range" min="0" max="0" value="0">
     <div class="time"><div id="t-utc"></div><div id="t-local" class="local"></div></div>
@@ -316,7 +339,7 @@ legend.innerHTML = `<h4>Legend</h4>
   <div class="legend-item"><span class="legend-swatch"><span class="sw-line"></span></span>Track</div>
   <div class="legend-item"><span class="legend-swatch"><span class="sw-pick"></span></span>Selected particle's path</div>
   <div class="legend-item"><span class="legend-swatch"><svg width="14" height="10"><path d="M1 5H12M8.5 2L12 5L8.5 8" stroke="#1d3557" stroke-width="1.3" fill="none"/></svg></span>Surface current (longer = faster)</div>`;
-addControl('bottomleft', legend);
+const particleLegend = addControl('bottomleft', legend);
 
 // ── Surface currents (arrows under the tracks) ──
 // The backend sends about one arrow per 30 px screen cell of the view, at the hour
@@ -342,12 +365,18 @@ const CurrentsLayer = L.Layer.extend({
     this._hour = hour;
     if (this._map) this._load();
   },
+  // 'surface' (particle runs) or 'plume' (the depth average the plume tool runs on); set before setTime
+  setSource(s) {
+    if (s === (this._source || 'surface')) return;
+    this._source = s;
+    this._hour = null;
+  },
   _clear() { this._canvas.width = 0; },
   async _load() {
     if (!this._hour) return;
     const b = map.getBounds(), clamp = x => Math.max(-180, Math.min(180, x));
     const q = this._q = `currents?time=${this._hour.toISOString()}&west=${clamp(b.getWest())}&south=${b.getSouth()}`
-      + `&east=${clamp(b.getEast())}&north=${b.getNorth()}&zoom=${map.getZoom()}`;
+      + `&east=${clamp(b.getEast())}&north=${b.getNorth()}&zoom=${map.getZoom()}&source=${this._source || 'surface'}`;
     let d;
     try { d = await api('GET', q); } catch { return; }  // arrows are extra; keep the last ones on failure
     if (q === this._q && this._map) this._draw(d);  // drop replies overtaken by a newer request
@@ -398,6 +427,7 @@ const releaseDot = L.circleMarker([0, 0], { radius: 7, weight: 2, color: '#1a1a2
 const releaseRing = L.circle([0, 0], { radius: 100, weight: 1.5, color: '#1a1a2e', dashArray: '4 4', fill: false, interactive: false });
 
 map.on('click', e => {
+  if (mode === 'plume') return Plume.click(e);
   const p = nearestParticle(e.containerPoint);
   if (p !== null) return pickParticle(p);
   if (picked !== null) return pickParticle(null);
@@ -641,7 +671,10 @@ function pickParticle(p) {
 $('p-clear').addEventListener('click', () => pickParticle(null));
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && picked !== null) pickParticle(null); });
 // Pointer cursor over a pickable particle, so the feature is discoverable
-map.on('mousemove', e => { map.getContainer().style.cursor = nearestParticle(e.containerPoint) === null ? '' : 'pointer'; });
+map.on('mousemove', e => {
+  if (mode === 'plume') return;
+  map.getContainer().style.cursor = nearestParticle(e.containerPoint) === null ? '' : 'pointer';
+});
 
 function km(lat1, lon1, lat2, lon2) {
   const r = Math.PI / 180, a = Math.sin((lat2 - lat1) * r / 2) ** 2
@@ -674,7 +707,41 @@ function leftAt(k) {
 }
 const pct = f => f >= 0.01 || f === 0 ? `${Math.round(100 * f)}%` : '<1%';
 
+// ── Tool switch: particle tracking or plume dilution (plume.js) share the map ──
+let mode = 'particle';
+const particleLayers = [trackLayer, dotLayer, releaseDot, releaseRing, pickLayer];
+let particleOnMap = [];
+function setMode(m) {
+  if (m === mode) return;
+  mode = m;
+  const plume = m === 'plume';
+  $('tab-particle').setAttribute('aria-selected', !plume);
+  $('tab-plume').setAttribute('aria-selected', plume);
+  $('mode-particle').hidden = plume;
+  $('mode-plume').hidden = !plume;
+  $('title').textContent = plume ? 'Salish Sea Model Plume Dilution' : 'Salish Sea Model Particle Tracking';
+  history.replaceState(null, '', plume ? '#plume' : location.pathname);
+  if (plume) {
+    pause();
+    particleOnMap = particleLayers.filter(l => map.hasLayer(l));
+    particleOnMap.forEach(l => l.remove());
+    $('player').style.display = 'none';
+    particleLegend.remove();
+  } else {
+    particleOnMap.forEach(l => l.addTo(map));
+    if (T) $('player').style.display = 'flex';
+    particleLegend.addTo(map);
+    currents.setSource('surface');
+    if (T || hours.length) currents.setTime(T ? T.dates[frame] : hours[+$('start').value]);
+  }
+  Plume.show(plume);
+}
+$('tab-particle').addEventListener('click', () => setMode('particle'));
+$('tab-plume').addEventListener('click', () => setMode('plume'));
+
 loadMeta();
 </script>
+<script src="plume.js"></script>
+<script>if (location.hash === '#plume') setMode('plume');</script>
 </body>
 </html>

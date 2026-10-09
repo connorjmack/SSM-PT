@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Web particle tracking for the Salish Sea on NOAA SSCOFS model output"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.12,<3.14"
+requires-python = ">=3.13,<3.14"
 dependencies = [
     "oceantracker==0.5.3.9",
     "exceptiongroup==1.3.1",  # imported by oceantracker 0.5.3.9 but not declared in its metadata
@@ -19,6 +19,7 @@ dependencies = [
     "fastapi==0.142.2",
     "uvicorn==0.54.0",
     "pydantic==2.13.5",
+    "plumes2==0.0.1.dev0",  # not on PyPI; pinned to a git commit in [tool.uv.sources]
 ]
 
 [dependency-groups]
@@ -35,3 +36,6 @@ packages = ["backend/ssm_pt"]
 
 [tool.pytest.ini_options]
 testpaths = ["backend/tests"]
+
+[tool.uv.sources]
+plumes2 = { git = "https://github.com/ebbcarbon/Plumes_Public", rev = "9791c80ff94f706603df0ae473667ccdffd359db" }
