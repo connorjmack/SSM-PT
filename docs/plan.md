@@ -183,6 +183,26 @@ A web particle-tracking tool for the Salish Sea for WDFW and other semi-technica
 - Synthetic: Gaussian plume for a continuous point source in uniform flow; mass budget (released = in domain + culled + decayed); superposition (two sources together = sum of separate runs, within noise).
 - Admiralty Inlet TD1 (paper): effluent 13.5–65.3 MGD (0.6–2.9 m³/s), TA ~7,600 µmol/kg, DIC 4,312 µmol/kg, pH 9.55. PLUMES gives flux-averaged dilution 7.5–8.5 at the plume surfacing (diameter ~1.6 m, depth 0.79 m) and 7.5–9.6 at the chronic mixing zone (62 m). Compare our ΔpH with SSM's Jul–Aug mean from co-authors (paper Figure 8 is an annual mean, so not directly comparable).
 
+### 20. Data on demand: a run fetches its own missing hours; forecast mode after (scoped 2026-10-09, not built)
+- Today a plume run sees only the hours `scripts/fetch_3d.py` has already written (Jul–Aug 2026); any other window is a 422. `catalog.py` is a docstring only and `fields.py` holds only `depth_average`.
+- Measured on the laptop (2026-10-09): one hour takes ~9 s per worker to fetch in either mode (depth-averaged or `--clip`), 14 s wall with process start-up. If 4 workers scale (untested), 3 days ≈ 3 min, a week ≈ 7 min, a month ≈ 30 min. Slower than the us-east-1 VM should be (decision 9).
+- S3 freshness: cycles at 03/09/15/21Z; the 2026-10-09 t15z cycle finished writing at 18:26 UTC (~3.5 h after cycle time). The newest nowcast hour is therefore ~3.5–9.5 h old, and each cycle adds a 72 h forecast (f001–f072).
+- **Stage 1, nowcast on demand (2024-10-01 to the newest nowcast hour):**
+  - `catalog.hour_key(t, mode="nowcast")` → S3 key, file name, label (replaces `nowcast_key` in `fetch_surface.py`); `latest_hour()` lists the last two days' S3 prefixes, cached ~10 min.
+  - `fields.ensure_hours(hours, kind, out, progress)`, `kind` = depth-averaged or Sequim-box 3D: the fetch and write functions move from `fetch_3d.py` into `fields`, and the script becomes a CLI over it. Atomic writes need a unique temporary name per writer; today's fixed `.part` name would collide when two runs fetch the same hour.
+  - Jobs: a separate fetch pool (4 processes) fills missing hours, then the run joins the run queue, so one run's fetch does not hold up another run. Status gains `fetching` with done/total. Hours missing on S3 fail the run with the list. PLUMES-each-hour runs also fetch their Sequim-box 3D hours.
+  - `/plume/meta` returns the archive range and the newest hour, not just what is on disk. The UI gets date/time inputs (a slider over two years of hours is unusable) and "Fetching currents 12 / 72…" in the status line.
+- **Stage 2, forecast (to +72 h):**
+  - `catalog` maps hours after the newest nowcast hour to the newest cycle's f001–f072 (f000 duplicates n006). File-name pattern and globs accept `f` steps.
+  - Forecast files go in `data/plume/forecast/<cycle>/`, since each cycle replaces them. A run spanning "now" links nowcast hours up to the newest, then forecast hours.
+  - The run id includes the forecast cycle; otherwise the result cache hands back an older cycle's forecast for an identical request.
+  - The UI marks the forecast part of the timeline and the result names its cycle. Refresh on demand first (the first forecast run after a new cycle waits ~3 min); a scheduled fetch each cycle once hosted.
+- Out of scope: the particle tab's surface files (same pattern, later); one S3 read writing both depth-averaged and 3D files (would halve PLUMES-mode fetches; deferred because fixed values are the default near field); cache eviction.
+- To decide before building (recommendation first):
+  - Longest on-demand fetch: 14 days (~13 min on the laptop if 4 workers scale). `duration_h` allows 62 days, ~1 h of fetching, too fragile for a browser request; longer windows stay with the CLI.
+  - Disk: no eviction yet. Depth-averaged files are ~7 GB per month of data, and the cache grows only with what is run. Revisit on the VM.
+  - Forecast refresh: on demand first, scheduled once hosted.
+
 ### Plume phases
 
 | # | Phase | Exit criterion |
@@ -190,6 +210,7 @@ A web particle-tracking tool for the Salish Sea for WDFW and other semi-technica
 | A | Jul–Aug depth-averaged data; `PlumeRequest` with one source and PLUMES inputs; ΔTA/ΔDIC gridding to disk; outfall layer; plume mode in the page (click to add a source, dilution heat map, receptors) | Synthetic tests pass; tidal-jet blurring at the bay entrance quantified; 2-month Sequim run shown in the browser |
 | B | Background TA/DIC; PyCO2SYS (approved); ΔpH and Ω maps; Admiralty TD1 run | Nonlinearity test passes; TD1 ΔpH matches SSM's footprint and order of magnitude |
 | C | Several sources (per-source shares); open-boundary culling; longer windows via the Phase 1 data layer; 3D gate on the Sequim box; Sequim WRF (WA0022349) as second source | Superposition test passes; month-scale multi-source run; 3D layer check passes or the fallback is chosen |
+| D | Data on demand (decision 20): nowcast archive fetched per run, then forecast to +72 h | A run outside the cached hours fetches and runs from the browser with progress shown; a forecast run names its cycle and is not served stale after a new cycle |
 
 ### Plume risks
 - **OceanTracker 3D path:** Phase 0 surface particles moved 3–7× too slowly. **Cause found and fixed (2026-10-09): layer order.** FVCOM stores layers surface-first (`siglay[0] = -0.0158`); OceanTracker 0.5.3.9's `FVCOMreader` flips the sigma fractions to its bottom-first order (`build_vertical_grid`) but not the velocities (`read_file_var_as_4D_nodal_values`), so surface particles got near-bottom velocities. Its SHYFEM and GLORYS readers flip both. `SSCOFS3DReader` (`oceantracker_engine.py`) flips the data too; test `test_3d_reader_puts_surface_currents_at_the_surface` (known sheared current on the Sequim mesh: the stock reader moved a 1 m-deep particle −29 m in 2 h against ~2,160 m expected, and a 90 m-deep one 1,217 m against ~0).
@@ -227,3 +248,4 @@ A web particle-tracking tool for the Salish Sea for WDFW and other semi-technica
 | 2026-10-09 | Decision 13: near field to be coupled hourly through `plumes2` (was: no built-in model). Decision 16: Sequim-box 3D files fetched now, not at Phase C | User asked for near-field resolution; PLUMES2.0 itself is GUI-only; UM3 needs current and T/S profiles at the outfall |
 | 2026-10-09 | Phase C multi-source pulled forward: up to 6 sources per run on one map, per-source fields in the API, blended per-source dye colours; "lowest dilution over the run" is now the summed field's peak. The UI's near field defaults to fixed values (PLUMES each hour is opt-in), so a default run reads only the depth-averaged files | User asked for two or more sources with a colour per source, and for a 2D-only default for the prototype; superposition test passes (Sequim WRF + Sequim Bay point) |
 | 2026-10-09 | Risks: OceanTracker 3D path cause found (FVCOM layer order) and fixed by `SSCOFS3DReader`; 3D layer check passed for near-surface use, deep residual (~14%) open | `scripts/layer_check.py` and `test_3d_reader_puts_surface_currents_at_the_surface` |
+| 2026-10-09 | Decision 20 and plume Phase D: runs fetch their own missing hours, then forecast mode; scoped, not built | User asked whether 3D data can be pulled in real time; measured ~9 s per hour per worker and S3 posting ~3.5 h after cycle time |

@@ -163,10 +163,31 @@ See plan.md decisions 10–19.
 - [ ] Coarse whole-domain grid (1–2 km cells) beside the fine map, so effluent that leaves the fine map is still counted and drawn (the whole domain at 150 m is ~21 M cells, ~86 MB per saved map per source)
 - [ ] Server segfaulted once (exit 139) on a page load, during the first current-arrow requests; not reproduced in 7 tries. Suspect concurrent netCDF/HDF5 reads from FastAPI's thread pool: one lock around the reads would rule it out. Run the server with `python -X faulthandler -m uvicorn …` so a repeat logs a trace
 - [ ] Open-boundary culling (Phase 2 task above) before any month-scale run
-- [ ] Longer windows through the Phase 1 data layer (`fields.ensure_hours`)
+- [ ] Longer windows through the Phase 1 data layer (`fields.ensure_hours`; Phase D below)
 - [x] 3D layer check on the Sequim box: fixed-depth releases vs direct layer integration (layer-order hypothesis confirmed; `SSCOFS3DReader` fixes it; `scripts/layer_check.py`)
 - [ ] Deep residual: 80 m down in 98 m water, OceanTracker moves ~14% less than direct layer integration (plan.md Risks)
 - [ ] Upstream issue to OceanTracker: `FVCOMreader` flips sigma fractions but not layer data
 - [ ] Kz from a Richardson-number scheme written as `A_Z_profile`
 - [ ] Trap-depth release; cull boundary inside the box; box-doubling sensitivity
 - [ ] Sequim WRF (WA0022349) as the second source
+
+### Phase D — data on demand, then forecast (plan.md decision 20; scoped, not started)
+- [ ] Decide: longest on-demand fetch (proposed 14 days), cache eviction (proposed none yet), forecast refresh (proposed on demand)
+
+Stage 1, nowcast on demand:
+- [ ] `catalog` tests and code (Phase 1 above), plus `latest_hour()` from S3 listings, cached ~10 min
+- [ ] Move `write_davg`, `write_clip`, `read_clip_grid` and `fetch_hour` from `scripts/fetch_3d.py` into `fields`; the script becomes a CLI over `ensure_hours`
+- [ ] `fields` tests (Phase 1 above) with a fake fetcher for both kinds (depth-averaged, Sequim-box 3D); unique temporary name per writer so two runs fetching one hour don't collide
+- [ ] Fetch pool (4 processes) in the API; plume jobs fetch missing hours, then queue the run; status `fetching` with done/total; hours missing on S3 fail the run with the list
+- [ ] PLUMES-each-hour runs also ensure their Sequim-box 3D hours
+- [ ] `/plume/meta` returns the archive range and newest hour; `POST /plumes` checks against those and the fetch cap
+- [ ] UI: date/time inputs over the archive; "Fetching currents k / N…" in the status line
+- [ ] README: no manual fetch needed; mark decision 20 built in plan.md
+
+Stage 2, forecast to +72 h:
+- [ ] Failing tests: hours after the newest nowcast hour map to the newest cycle's f001–f072; f000 never chosen
+- [ ] File-name pattern and globs (`FILE_NAME`, `window_files`, `hour_files`) accept `f` steps
+- [ ] Forecast cache per cycle in `data/plume/forecast/<cycle>/`; a run spanning "now" links nowcast then forecast hours
+- [ ] Failing test then fix: the run id includes the forecast cycle, so the same request after a new cycle runs again
+- [ ] UI marks the forecast part of the timeline; result names its cycle
+- [ ] Scheduled fetch each cycle, once hosted (Phase 5)
